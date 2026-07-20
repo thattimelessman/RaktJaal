@@ -10,6 +10,7 @@ import {
   Heart,
   Activity,
   MapPin,
+  Quote,
   TestTube2,
   Syringe,
   ShieldCheck,
@@ -18,8 +19,9 @@ import {
   Sparkles,
 } from "lucide-react";
 
+
 const FONT_IMPORT = `
-@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
 @keyframes float { 0%,100% { transform: translateY(0px) rotate(var(--r,0deg)); } 50% { transform: translateY(-14px) rotate(var(--r,0deg)); } }
 @keyframes pulseRing { 0% { transform: scale(0.9); opacity: 0.6; } 70% { transform: scale(1.6); opacity: 0; } 100% { opacity: 0; } }
 @keyframes dash { to { stroke-dashoffset: 0; } }
@@ -45,7 +47,7 @@ const IMG = {
   syringe: "https://images.unsplash.com/photo-1542884841-9f546e727bca?fm=jpg&q=80&w=1600&auto=format&fit=crop",
 };
 
-const FD = "'Space Grotesk', sans-serif";
+const FD = "'Plus Jakarta Sans', sans-serif";
 const FB = "'Manrope', sans-serif";
 const FM = "'JetBrains Mono', monospace";
 
@@ -145,36 +147,47 @@ function BrandMark({ size = 36, ring = true }) {
 
 function Nav() {
   return (
-    <header className="sticky top-0 z-40 backdrop-blur-md" style={{ background: `${C.paper}E8`, borderBottom: `1px solid ${C.ink}12` }}>
-      <div className="max-w-6xl mx-auto px-6 md:px-10 h-20 flex items-center justify-between">
-        <a href="#top" className="flex items-center gap-2.5">
-          <BrandMark size={30} ring={false} />
-          <span className="text-lg font-semibold tracking-tight" style={{ color: C.ink, fontFamily: FD }}>
+    <div className="sticky top-4 md:top-6 z-50 mx-4 md:max-w-7xl md:mx-auto">
+      <header 
+        className="flex items-center justify-between px-4 md:px-6 py-2 rounded-full backdrop-blur-xl" 
+        style={{ 
+          background: "rgba(240, 238, 235, 0.85)", // Subtle light gray pill background
+          border: `1px solid ${C.ink}14`,
+          boxShadow: "0 12px 32px -12px rgba(20,17,15,0.12)"
+        }}
+      >
+        <a href="#top" className="flex items-center gap-2.5 pl-2">
+          <BrandMark size={28} ring={false} />
+          <span className="text-base md:text-lg font-semibold tracking-tight" style={{ color: C.ink, fontFamily: FD }}>
             RaktJaal
           </span>
         </a>
-        <nav className="hidden md:flex items-center gap-8 text-sm" style={{ color: C.ink, fontFamily: FB }}>
+        
+        <nav className="hidden md:flex items-center gap-8 text-sm" style={{ color: C.ink, fontFamily: FB, fontWeight: 500 }}>
           {[["How it works", "#how"], ["What's built", "#built"], ["FAQs", "#faq"], ["For hospitals", "#hospitals"]].map(([l, h]) => (
-            <a key={h} href={h} className="opacity-65 hover:opacity-100 transition-opacity">{l}</a>
+            <a key={h} href={h} className="opacity-70 hover:opacity-100 transition-opacity">{l}</a>
           ))}
         </nav>
-        <div className="flex items-center gap-3">
-          <button className="hidden sm:block text-sm px-4 py-2.5 rounded-full transition-colors hover:bg-[#F4F2EF]" style={{ color: C.ink, fontFamily: FB, fontWeight: 600 }}>
+
+        <div className="flex items-center gap-2">
+          {/* Styled exactly like the "Sign in" button in your reference */}
+          <button className="hidden sm:block text-sm px-4 py-2 rounded-full bg-white transition-transform hover:scale-105" style={{ color: C.ink, fontFamily: FB, fontWeight: 600, border: `1px solid ${C.ink}14` }}>
             Log in
           </button>
+          
+          {/* Styled exactly like the dark "Get started" button in your reference */}
           <a
             href="#finder"
-            className="text-sm px-5 py-2.5 rounded-full text-white transition-transform hover:scale-[1.04] active:scale-95"
-            style={{ background: C.brick, fontFamily: FB, fontWeight: 600 }}
+            className="text-sm px-5 py-2.5 rounded-full text-white transition-transform hover:scale-[1.04] active:scale-95 shadow-sm"
+            style={{ background: C.ink, fontFamily: FB, fontWeight: 600 }}
           >
             Get started
           </a>
         </div>
-      </div>
-    </header>
+      </header>
+    </div>
   );
 }
-
 /* ---------------- Hero ---------------- */
 
 function FloatingChip({ icon: Icon, style, delay = "0s" }) {
@@ -365,7 +378,7 @@ function FeatureGrids() {
                 <span className="px-2 py-1 rounded-md text-xs text-white" style={{ background: C.brick }}>O-negative</span>
                 <span className="px-2 py-1 rounded-md text-xs" style={{ background: "#F0EDE9", color: C.ink }}>2 units</span>
               </div>
-              <div className="text-xs mt-1" style={{ color: C.ink }}>Lucknow District Hospital</div>
+              <div className="text-xs mt-1" style={{ color: C.ink }}>Kanpur District Hospital</div>
             </div>
           </MockWindow>
         </FeatureBlock>
@@ -523,14 +536,38 @@ function Narrative() {
 
 function Testimonials() {
   const items = [
-    { initials: "D", tag: "A donor", quote: "I didn't know someone nearby needed my type until the alert came through.", bg: C.peach },
-    { initials: "F", tag: "A patient's sister", quote: "We stopped refreshing WhatsApp groups and just waited for a match instead.", bg: C.mint },
-    { initials: "H", tag: "A hospital coordinator", quote: "One request, sent once, reaching only donors who actually match.", bg: C.sky },
-    { initials: "D", tag: "A repeat donor", quote: "I get asked only when my exact type is needed nearby — never spam.", bg: C.blush },
+    { 
+      initials: "D", 
+      tag: "A donor", 
+      quote: "I didn't know someone nearby needed my type until the alert came through.", 
+      bg: C.peach,
+      img: "https://plus.unsplash.com/premium_vector-1765379372386-b791928e328c?q=80&w=735&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D"
+    },
+    { 
+      initials: "F", 
+      tag: "A patient's sister", 
+      quote: "We stopped refreshing WhatsApp groups and just waited for a match instead.", 
+      bg: C.mint,
+      img: "https://plus.unsplash.com/premium_vector-1764834267224-9c5aae78e152?q=80&w=687&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D"
+    },
+    { 
+      initials: "H", 
+      tag: "A hospital coordinator", 
+      quote: "One request, sent once, reaching only donors who actually match.", 
+      bg: C.sky,
+      img: "https://plus.unsplash.com/premium_vector-1720636314575-748da2042f21?q=80&w=880&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D"
+    },
+    { 
+      initials: "D", 
+      tag: "A repeat donor", 
+      quote: "I get asked only when my exact type is needed nearby — never spam.", 
+      bg: C.blush,
+      img: "https://plus.unsplash.com/premium_vector-1765363113016-8cc31243202d?w=600&auto=format&fit=crop&q=60&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxzZWFyY2h8MjR8fGJsb29kJTIwZG9uYXRlfGVufDB8fDB8fHwx"
+    },
   ];
   const [start, setStart] = useState(0);
   const visible = 3;
-  const max = Math.max(0, items.length - visible);
+  const max = Math.max(0, items.length - visible); // reachable start positions: 0..max
 
   return (
     <section className="max-w-6xl mx-auto px-6 md:px-10 py-24">
@@ -539,15 +576,26 @@ function Testimonials() {
           Who this is built for
         </h2>
       </Reveal>
-      <div className="overflow-hidden">
-        <div className="flex gap-5 transition-transform duration-500" style={{ transform: `translateX(-${start * (100 / visible)}%)` }}>
+      <div className="overflow-hidden py-2">
+        <div className="flex gap-5 transition-transform duration-500" style={{ transform: `translateX(calc(-${start} * (100% + 20px) / ${visible}))` }}>
           {items.map((t, i) => (
-            <div key={i} className="shrink-0" style={{ width: `${100 / visible}%` }}>
+            <div key={i} className="shrink-0" style={{ width: `calc((100% - ${(visible - 1) * 20}px) / ${visible})` }}>
               <div className="rounded-2xl overflow-hidden transition-transform duration-300 hover:-translate-y-1" style={{ border: `1px solid ${C.ink}14` }}>
-                <div className="h-32 flex items-center justify-center relative" style={{ background: t.bg }}>
-                  <div className="w-12 h-12 rounded-full flex items-center justify-center text-white text-sm" style={{ background: C.ink, fontFamily: FD }}>{t.initials}</div>
-                  <Play size={16} className="absolute top-3 left-3" color={C.ink} />
+                
+                {/* Updated this div below to use the images */}
+                <div 
+                  className="aspect-video w-full flex items-center justify-center relative"
+                  style={{ 
+                    backgroundImage: `url('${t.img}')`,
+                    backgroundSize: 'cover',
+                    backgroundPosition: 'center',
+                    backgroundColor: t.bg 
+                  }}
+                >
+                
+                  <Quote size={16} className="absolute top-3 left-3" color="#550000" fill="#550000" />
                 </div>
+
                 <div className="p-4" style={{ fontFamily: FB }}>
                   <p className="text-sm" style={{ color: C.ink }}>{t.quote}</p>
                   <p className="text-xs mt-2" style={{ color: C.sub }}>{t.tag}</p>
@@ -558,15 +606,21 @@ function Testimonials() {
         </div>
       </div>
       <div className="flex items-center justify-center gap-4 mt-6">
-        <button onClick={() => setStart((s) => Math.max(0, s - 1))} className="w-9 h-9 rounded-full flex items-center justify-center transition-colors hover:bg-[#F4F2EF]" style={{ border: `1px solid ${C.ink}33` }}>
+        <button onClick={() => setStart((s) => Math.max(0, s - 1))} className="w-9 h-9 rounded-full flex items-center justify-center transition-colors hover:bg-[#F4F2EF] disabled:opacity-30 disabled:cursor-not-allowed" style={{ border: `1px solid ${C.ink}33` }} disabled={start === 0}>
           <ChevronLeft size={16} color={C.ink} />
         </button>
         <div className="flex gap-1.5">
-          {items.map((_, i) => (
-            <span key={i} className="w-1.5 h-1.5 rounded-full transition-colors" style={{ background: i === start ? C.ink : `${C.ink}33` }} />
+          {Array.from({ length: max + 1 }).map((_, i) => (
+            <button
+              key={i}
+              onClick={() => setStart(i)}
+              aria-label={`Go to slide ${i + 1}`}
+              className="w-1.5 h-1.5 rounded-full transition-colors"
+              style={{ background: i === start ? C.ink : `${C.ink}33` }}
+            />
           ))}
         </div>
-        <button onClick={() => setStart((s) => Math.min(max, s + 1))} className="w-9 h-9 rounded-full flex items-center justify-center transition-colors hover:bg-[#F4F2EF]" style={{ border: `1px solid ${C.ink}33` }}>
+        <button onClick={() => setStart((s) => Math.min(max, s + 1))} className="w-9 h-9 rounded-full flex items-center justify-center transition-colors hover:bg-[#F4F2EF] disabled:opacity-30 disabled:cursor-not-allowed" style={{ border: `1px solid ${C.ink}33` }} disabled={start === max}>
           <ChevronRight size={16} color={C.ink} />
         </button>
       </div>
