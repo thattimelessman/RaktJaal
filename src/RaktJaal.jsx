@@ -188,6 +188,7 @@ function Nav() {
     </div>
   );
 }
+
 /* ---------------- Hero ---------------- */
 
 function FloatingChip({ icon: Icon, style, delay = "0s" }) {
