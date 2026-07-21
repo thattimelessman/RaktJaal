@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { Link } from "react-router-dom";
 import {
   Paperclip,
   ArrowUp,
@@ -42,7 +43,7 @@ const C = {
 };
 
 const IMG = {
-  iv: "https://images.unsplash.com/photo-1516574187841-cb9cc2ca948b?fm=jpg&q=80&w=1200&auto=format&fit=crop",
+  iv: "https://plus.unsplash.com/premium_vector-1720520991612-8bd84487af6f?q=80&w=880&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D",
   tube: "https://images.unsplash.com/photo-1639772823849-6efbd173043c?fm=jpg&q=80&w=1200&auto=format&fit=crop",
   syringe: "https://images.unsplash.com/photo-1542884841-9f546e727bca?fm=jpg&q=80&w=1600&auto=format&fit=crop",
 };
@@ -169,20 +170,21 @@ function Nav() {
           ))}
         </nav>
 
-        <div className="flex items-center gap-2">
-          {/* Styled exactly like the "Sign in" button in your reference */}
-          <button className="hidden sm:block text-sm px-4 py-2 rounded-full bg-white transition-transform hover:scale-105" style={{ color: C.ink, fontFamily: FB, fontWeight: 600, border: `1px solid ${C.ink}14` }}>
-            Log in
-          </button>
-          
-          {/* Styled exactly like the dark "Get started" button in your reference */}
-          <a
-            href="#finder"
-            className="text-sm px-5 py-2.5 rounded-full text-white transition-transform hover:scale-[1.04] active:scale-95 shadow-sm"
-            style={{ background: C.ink, fontFamily: FB, fontWeight: 600 }}
+         <div className="flex items-center gap-2">
+          <Link
+          to="/login"
+          className="hidden sm:block text-[15px] px-4 py-2.5 font-medium text-gray-600 hover:text-[#D6303F] transition-colors"
+          style={{ fontFamily: FB }}
           >
-            Get started
-          </a>
+           Log in
+          </Link>
+          <Link
+          to="/register"
+          className="text-[15px] px-6 py-2.5 rounded-full text-white font-medium transition-all duration-200 hover:scale-[1.04] active:scale-90"
+          style={{ background: C.ink, fontFamily: FB }}
+         >
+        Get started
+        </Link>
         </div>
       </header>
     </div>
@@ -680,10 +682,10 @@ function CTA() {
           Try the coverage check above, or reach out if you want to help pilot RaktJaal in your city.
         </p>
         <div className="mt-7 flex items-center justify-center gap-3">
-          <a href="#top" className="px-6 py-3 rounded-full text-sm text-white transition-transform hover:scale-[1.04] active:scale-95" style={{ background: C.brick, fontFamily: FB, fontWeight: 600 }}>
+          <Link to="/register" className="px-6 py-3 rounded-full text-sm text-white transition-transform hover:scale-[1.04] active:scale-95" style={{ background: C.brick, fontFamily: FB, fontWeight: 600 }}>
             Get Started
-          </a>
-          <a href="#team" className="px-6 py-3 rounded-full text-sm transition-colors hover:bg-white" style={{ border: `1px solid ${C.ink}33`, color: C.ink, fontFamily: FB, fontWeight: 600 }}>
+          </Link>
+          <a href="mailto:glactrocipher@gmail.com" className="px-6 py-3 rounded-full text-sm transition-colors hover:bg-white" style={{ border: `1px solid ${C.ink}33`, color: C.ink, fontFamily: FB, fontWeight: 600 }}>
             Contact the team
           </a>
         </div>
