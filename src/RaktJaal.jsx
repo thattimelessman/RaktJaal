@@ -164,7 +164,7 @@ function Nav() {
         </a>
         
         <nav className="hidden md:flex items-center gap-8 text-sm" style={{ color: C.ink, fontFamily: FB, fontWeight: 500 }}>
-          {[["How it works", "#how"], ["What's built", "#built"], ["FAQs", "#faq"], ["For hospitals", "#hospitals"]].map(([l, h]) => (
+          {[["How it works", "#how"], ["What's built", "#built"], ["Why this matters", "#why"], ["Who this is built for", "#who"], ["FAQs", "#faq"]].map(([l, h]) => (
             <a key={h} href={h} className="opacity-70 hover:opacity-100 transition-opacity">{l}</a>
           ))}
         </nav>
@@ -189,7 +189,6 @@ function Nav() {
     </div>
   );
 }
-
 /* ---------------- Hero ---------------- */
 
 function FloatingChip({ icon: Icon, style, delay = "0s" }) {
@@ -309,9 +308,9 @@ function Hero() {
 
 function TrustStrip() {
   const items = [
-    { icon: ShieldCheck, label: "Low haemoglobin? Not on our watch." },
-    { icon: Heart, label: "Your blood tells a story. We make sure it's a healthy one." },
-    { icon: Droplet, label: "Privacy without compromise." },
+    { icon: ShieldCheck, label: "BE SOMEONE'S LIFELINE BY DONATING BLOOD" },
+    { icon: Heart, label: "LIFE FLOWS FROM THOSE WHO CARE" },
+    { icon: Droplet, label: "PRIVACY WITHOUT COMPROMISE" },
   ];
   return (
     <section style={{ borderTop: `1px solid ${C.ink}12`, borderBottom: `1px solid ${C.ink}12` }}>
@@ -509,7 +508,7 @@ function VitalsLine() {
 
 function Narrative() {
   return (
-    <section className="py-24 relative overflow-hidden" style={{ background: C.ink }}>
+    <section id="why" className="py-24 relative overflow-hidden" style={{ background: C.ink }}>
       <div className="max-w-4xl mx-auto px-6 md:px-10 text-center relative">
         <Reveal>
           <p className="text-xs uppercase tracking-wider mb-4" style={{ color: C.blush, fontFamily: FM }}>Why this matters</p>
@@ -547,7 +546,7 @@ function Testimonials() {
     },
     { 
       initials: "F", 
-      tag: "A patient's sister", 
+      tag: "Receiver", 
       quote: "We stopped refreshing WhatsApp groups and just waited for a match instead.", 
       bg: C.mint,
       img: "https://plus.unsplash.com/premium_vector-1764834267224-9c5aae78e152?q=80&w=687&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D"
@@ -572,12 +571,13 @@ function Testimonials() {
   const max = Math.max(0, items.length - visible); // reachable start positions: 0..max
 
   return (
-    <section className="max-w-6xl mx-auto px-6 md:px-10 py-24">
+    <section id="who" className="max-w-6xl mx-auto px-6 md:px-10 py-24">
       <Reveal>
         <h2 className="text-3xl md:text-4xl text-center font-medium tracking-tight mb-12" style={{ color: C.ink, fontFamily: FD }}>
           Who this is built for
         </h2>
       </Reveal>
+
       <div className="overflow-hidden py-2">
         <div className="flex gap-5 transition-transform duration-500" style={{ transform: `translateX(calc(-${start} * (100% + 20px) / ${visible}))` }}>
           {items.map((t, i) => (
