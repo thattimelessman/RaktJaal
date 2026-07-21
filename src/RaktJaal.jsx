@@ -142,48 +142,43 @@ function BrandMark({ size = 36, ring = true }) {
     </div>
   );
 }
-
-/* ---------------- Nav ---------------- */
-
 function Nav() {
   return (
-    <div className="sticky top-4 md:top-6 z-50 mx-4 md:max-w-7xl md:mx-auto">
+    <div className="sticky top-2 z-50 mx-4 md:max-w-7xl md:mx-auto">
       <header 
-        className="flex items-center justify-between px-4 md:px-6 py-2 rounded-full backdrop-blur-xl" 
-        style={{ 
-          background: "rgba(240, 238, 235, 0.85)", // Subtle light gray pill background
-          border: `1px solid ${C.ink}14`,
-          boxShadow: "0 12px 32px -12px rgba(20,17,15,0.12)"
-        }}
+        className="flex items-center justify-between px-2.5 py-1.5 rounded-full bg-white/80 backdrop-blur-lg border border-white/60 transition-all duration-300"
       >
-        <a href="#top" className="flex items-center gap-2.5 pl-2">
-          <BrandMark size={28} ring={false} />
-          <span className="text-base md:text-lg font-semibold tracking-tight" style={{ color: C.ink, fontFamily: FD }}>
+        <a href="#top" className="flex items-center gap-2 pl-2">
+          <BrandMark size={22} ring={false} /> 
+          <span className="text-[16px] font-bold tracking-tight text-neutral-900">
             RaktJaal
           </span>
         </a>
         
-        <nav className="hidden md:flex items-center gap-8 text-sm" style={{ color: C.ink, fontFamily: FB, fontWeight: 500 }}>
-          {[["How it works", "#how"], ["What's built", "#built"], ["Why this matters", "#why"], ["Who this is built for", "#who"], ["FAQs", "#faq"]].map(([l, h]) => (
-            <a key={h} href={h} className="opacity-70 hover:opacity-100 transition-opacity">{l}</a>
-          ))}
+        <nav className="hidden md:flex items-center gap-7 text-[14px] font-medium text-neutral-600">
+          <a href="#how" className="hover:text-neutral-900 transition-colors duration-200">How it works</a>
+          <a href="#built" className="hover:text-neutral-900 transition-colors duration-200">What's built</a>
+          <a href="#why" className="hover:text-neutral-900 transition-colors duration-200">Why this matters</a>
+          <a href="#who" className="hover:text-neutral-900 transition-colors duration-200">Who this is built for</a>
+          
+          <div className="w-[1px] h-3.5 bg-neutral-300"></div>
+          
+          <a href="#faq" className="hover:text-neutral-900 transition-colors duration-200">FAQs</a>
         </nav>
 
-         <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 pr-0.5">
           <Link
-          to="/login"
-          className="hidden sm:block text-[15px] px-4 py-2.5 font-medium text-gray-600 hover:text-[#D6303F] transition-colors"
-          style={{ fontFamily: FB }}
+            to="/login"
+            className="hidden sm:block text-[14px] px-3.5 py-1.5 rounded-full font-medium bg-black/5 text-neutral-900 hover:bg-black/10 transition-colors duration-200"
           >
-           Log in
+            Sign in
           </Link>
           <Link
-          to="/register"
-          className="text-[15px] px-6 py-2.5 rounded-full text-white font-medium transition-all duration-200 hover:scale-[1.04] active:scale-90"
-          style={{ background: C.ink, fontFamily: FB }}
-         >
-        Get started
-        </Link>
+            to="/register"
+            className="text-[14px] px-4 py-1.5 rounded-full font-medium bg-black text-white hover:bg-neutral-800 transition-all duration-200 active:scale-95"
+          >
+            Get started
+          </Link>
         </div>
       </header>
     </div>
@@ -281,10 +276,6 @@ function Hero() {
 
       <Reveal delay={0.15}>
         <div className="relative">
-          <FloatingChip icon={TestTube2} style={{ top: "-8%", left: "-6%" }} delay="0s" />
-          <FloatingChip icon={Syringe} style={{ bottom: "8%", right: "-8%" }} delay="1.2s" />
-          <FloatingChip icon={Activity} style={{ top: "38%", right: "-10%" }} delay="2.1s" />
-
           <div className="rounded-[2rem] overflow-hidden relative" style={{ boxShadow: "0 30px 60px -20px rgba(20,17,15,0.35)" }}>
             <img src={IMG.iv} alt="IV line, ready for a transfusion" className="w-full h-[420px] object-cover" />
             <div className="absolute inset-0" style={{ background: "linear-gradient(180deg, transparent 40%, rgba(20,17,15,0.65) 100%)" }} />
@@ -699,7 +690,7 @@ function Footer() {
   const team = ["Aayush Singh", "Agraj Singh", "Ananya Arora", "Akhil Kumar Yadav", "Mohammad Aqif Khan"];
   return (
     <footer style={{ background: C.ink }}>
-      <div className="max-w-6xl mx-auto px-6 md:px-10 py-16 grid md:grid-cols-4 gap-10">
+      <div className="max-w-6xl mx-auto px-6 md:px-10 py-16 grid md:grid-cols-3 gap-10">
         <div>
           <div className="flex items-center gap-2 mb-4">
             <BrandMark size={28} ring={false} />
@@ -709,14 +700,7 @@ function Footer() {
             PSIT Kanpur · Dept. of Data Science · Mini Project 2026–27
           </p>
         </div>
-        <div>
-          <p className="text-xs uppercase tracking-wider mb-4" style={{ color: "#FFFFFF80", fontFamily: FM }}>Product</p>
-          <div className="flex flex-col gap-2.5 text-sm" style={{ fontFamily: FB }}>
-            {[["How it works", "#how"], ["What's built", "#built"], ["FAQs", "#faq"]].map(([l, h]) => (
-              <a key={h} href={h} className="text-white opacity-70 hover:opacity-100 transition-opacity">{l}</a>
-            ))}
-          </div>
-        </div>
+        
         <div id="team">
           <p className="text-xs uppercase tracking-wider mb-4" style={{ color: "#FFFFFF80", fontFamily: FM }}>Team CS-DS-3A-05</p>
           <div className="flex flex-col gap-2.5 text-sm" style={{ fontFamily: FB }}>
