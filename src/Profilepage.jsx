@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { getCurrentUser, saveCurrentUser, clearCurrentUser } from "./authStore";
+import { getCurrentUser, saveCurrentUser, clearCurrentUser } from "./AuthStore";
 import {
   Droplet,
   MapPin,
@@ -21,6 +21,10 @@ import {
    file is meant to drop in standalone; move to a shared tokens.js
    once the project has one.
 ------------------------------------------------------------------ */
+const FONT_IMPORT = `
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+`;
+
 const C = {
   ink: "#14110F",
   paper: "#FFFFFF",
@@ -33,11 +37,28 @@ const C = {
   sky: "#DCEEFF",
   border: "#14110F1A",
 };
-const FD = "'Space Grotesk', sans-serif";
+const FD = "'Plus Jakarta Sans', sans-serif";
 const FB = "'Manrope', sans-serif";
 const FM = "'JetBrains Mono', monospace";
 
 const BLOOD_TYPES = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"];
+
+/* Same mark used in Nav (RaktJaal.jsx) and BrandPanel (AuthPage.jsx) —
+   duplicated here for the same standalone-file reason as the tokens above. */
+function BrandMark({ size = 22 }) {
+  return (
+    <div className="relative shrink-0" style={{ width: size, height: size }}>
+      <svg width={size} height={size} viewBox="0 0 40 40" className="relative">
+        <path
+          d="M20 3 C28 15 34 24 34 30 C34 36 27.7 40 20 40 C12.3 40 6 36 6 30 C6 24 12 15 20 3 Z"
+          fill={C.brick}
+        />
+        <rect x="17" y="18" width="6" height="16" rx="1.5" fill="#fff" />
+        <rect x="12" y="23" width="16" height="6" rx="1.5" fill="#fff" />
+      </svg>
+    </div>
+  );
+}
 
 const REQUIRED_FIELDS = [
   { key: "name", label: "Full name", icon: null },
@@ -57,6 +78,7 @@ function missingFields(user) {
 function SignedOut() {
   return (
     <div className="min-h-screen flex items-center justify-center px-6" style={{ background: C.paper }}>
+      <style>{FONT_IMPORT}</style>
       <div className="text-center max-w-sm">
         <div
           className="w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-5"
@@ -219,16 +241,11 @@ function nextEligibleText(donations) {
 ------------------------------------------------------------------ */
 export default function ProfilePage() {
   const navigate = useNavigate();
-  const [user, setUser] = useState(undefined); // undefined = not checked yet
+  const [user, setUser] = useState(() => getCurrentUser()); // lazy init: read session once, on mount
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState({});
   const [saved, setSaved] = useState(false);
 
-  useEffect(() => {
-    setUser(getCurrentUser());
-  }, []);
-
-  if (user === undefined) return null; // avoid a flash before sessionStorage is checked
   if (!user) return <SignedOut />;
 
   const missing = missingFields(user);
@@ -270,11 +287,12 @@ export default function ProfilePage() {
 
   return (
     <div className="min-h-screen" style={{ background: C.paper }}>
+      <style>{FONT_IMPORT}</style>
       {/* top bar */}
       <header style={{ borderBottom: `1px solid ${C.border}` }}>
         <div className="max-w-2xl mx-auto px-6 h-16 flex items-center justify-between">
           <Link to="/" className="flex items-center gap-2">
-            <Droplet size={18} color={C.brick} />
+            <BrandMark size={22} />
             <span className="text-sm font-semibold" style={{ color: C.ink, fontFamily: FD }}>
               RaktJaal
             </span>

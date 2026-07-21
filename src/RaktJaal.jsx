@@ -6,7 +6,6 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
-  Play,
   Droplet,
   Heart,
   Activity,

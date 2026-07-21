@@ -2,8 +2,8 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import RaktJaal from "./RaktJaal.jsx";
-import AuthPage from "./AuthPage.jsx";
-import ProfilePage from "./ProfilePage.jsx";
+import AuthPage from "./Authpage.jsx";
+import ProfilePage from "./Profilepage.jsx";
 import "./index.css";
 
 ReactDOM.createRoot(document.getElementById("root")).render(
