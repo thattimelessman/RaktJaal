@@ -282,10 +282,10 @@ function Hero() {
             <div className="absolute bottom-5 left-5 right-5 flex items-center justify-between">
               <div className="flex items-center gap-2 text-white text-xs" style={{ fontFamily: FM }}>
                 <span className="w-2 h-2 rounded-full" style={{ background: "#5FD07A" }} />
-                MATCH FOUND · 1.2KM AWAY
+                MATCH FOUND · NEAR YOU
               </div>
               <div className="px-2.5 py-1 rounded-full text-xs text-white" style={{ background: "#FFFFFF26", fontFamily: FM }}>
-                O-NEG
+                Saviour
               </div>
             </div>
           </div>
