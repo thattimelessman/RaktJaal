@@ -285,7 +285,7 @@ function Hero() {
                 MATCH FOUND · NEAR YOU
               </div>
               <div className="px-2.5 py-1 rounded-full text-xs text-white" style={{ background: "#FFFFFF26", fontFamily: FM }}>
-                Saviour
+                Savior
               </div>
             </div>
           </div>
