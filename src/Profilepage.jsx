@@ -381,23 +381,47 @@ function Pill({ children }) {
 /** Circular avatar — shows the stored profile photo when present,
  *  otherwise falls back to initials. Used in the Profile row and the
  *  sidebar identity chip, so both stay in sync automatically. */
+/** Circular avatar — now with a built-in full-screen pop-out! */
 function Avatar({ photo, initials, size = 40 }) {
+  const [expanded, setExpanded] = useState(false);
+
   return (
-    <div
-      className="rounded-full overflow-hidden flex items-center justify-center shrink-0"
-      style={{ width: size, height: size, background: C.chip }}
-    >
-      {photo ? (
-        <img src={photo} alt="Profile" className="w-full h-full object-cover" />
-      ) : (
-        <span className="font-semibold" style={{ color: C.ink, fontFamily: F, fontSize: Math.round(size * 0.35) }}>
-          {initials}
-        </span>
+    <>
+      {/* 1. The normal small avatar */}
+      <div
+        className="rounded-full overflow-hidden flex items-center justify-center shrink-0 transition-opacity hover:opacity-80"
+        style={{ width: size, height: size, background: C.chip, cursor: photo ? "pointer" : "default" }}
+        onClick={() => photo && setExpanded(true)}
+      >
+        {photo ? (
+          <img src={photo} alt="Profile" className="w-full h-full object-cover" />
+        ) : (
+          <span className="font-semibold" style={{ color: C.ink, fontFamily: F, fontSize: Math.round(size * 0.35) }}>
+            {initials}
+          </span>
+        )}
+      </div>
+
+      {/* 2. The social-media style full-screen overlay */}
+      {expanded && photo && (
+        <div 
+          className="fixed inset-0 z-[9999] flex items-center justify-center p-4 sm:p-10"
+          style={{ background: "rgba(0,0,0,0.85)", backdropFilter: "blur(5px)" }}
+          onClick={() => setExpanded(false)}
+        >
+          <img 
+            src={photo} 
+            alt="Expanded profile" 
+            className="max-w-full max-h-full rounded-2xl shadow-2xl transition-transform" 
+            style={{ animation: "scale-up 0.2s ease-out forwards" }}
+            onClick={(e) => e.stopPropagation()} // Stops the image click from closing it
+          />
+          <style>{`@keyframes scale-up { from { transform: scale(0.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }`}</style>
+        </div>
       )}
-    </div>
+    </>
   );
 }
-
 /** Small hover/focus tooltip — used for the verified-donor badge and the
  *  new phone-verified badge. Keyboard accessible (shows on focus, not
  *  just mouseover) and dismisses on blur/mouse-leave. */
