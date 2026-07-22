@@ -1032,7 +1032,7 @@ function BloodTypePicker({ value, onSave }) {
             className="text-xs px-3.5 py-2 rounded-full text-white transition-opacity hover:opacity-85"
             style={{ background: C.ink, fontFamily: F, fontWeight: 600 }}
           >
-            {value ? `Confirm change to ${draft}` : `Save ${draft} — can't be changed casually later`}
+            {value ? `Confirm change to ${draft}` : `Save ${draft}   can't be changed casually later`}
           </button>
         </div>
       )}
