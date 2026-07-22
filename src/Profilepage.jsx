@@ -37,6 +37,11 @@ const FONT_IMPORT = `
 @keyframes drift1 { 0%,100% { transform: translate(0,0) scale(1); } 50% { transform: translate(40px,-30px) scale(1.08); } }
 @keyframes drift2 { 0%,100% { transform: translate(0,0) scale(1); } 50% { transform: translate(-50px,20px) scale(1.05); } }
 @keyframes drift3 { 0%,100% { transform: translate(0,0) scale(1); } 50% { transform: translate(20px,40px) scale(1.1); } }
+.rk-scroll { scrollbar-width: thin; scrollbar-color: #D4D4D8 transparent; }
+.rk-scroll::-webkit-scrollbar { width: 7px; }
+.rk-scroll::-webkit-scrollbar-track { background: transparent; }
+.rk-scroll::-webkit-scrollbar-thumb { background: #D4D4D8; border-radius: 999px; }
+.rk-scroll::-webkit-scrollbar-thumb:hover { background: #B8B8BE; }
 `;
 
 const C = {
@@ -1304,6 +1309,10 @@ function IdentityCapture({ hasPhoto, onSave, onRemove, onAlsoSetProfilePhoto }) 
   const [captured, setCaptured] = useState(null);
   const [useAsProfilePhoto, setUseAsProfilePhoto] = useState(true);
   const [captureError, setCaptureError] = useState("");
+  // The video element can report phase "live" before it has actually
+  // decoded a frame — capturing before that produces an all-black photo.
+  // videoReady only flips true once a real frame has arrived.
+  const [videoReady, setVideoReady] = useState(false);
 
   const stopStream = () => {
     streamRef.current?.getTracks().forEach((t) => t.stop());
@@ -1315,6 +1324,7 @@ function IdentityCapture({ hasPhoto, onSave, onRemove, onAlsoSetProfilePhoto }) 
   const startCamera = async () => {
     setPhase("requesting");
     setCaptureError("");
+    setVideoReady(false);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false });
       streamRef.current = stream;
@@ -1331,7 +1341,12 @@ function IdentityCapture({ hasPhoto, onSave, onRemove, onAlsoSetProfilePhoto }) 
 
   const capture = () => {
     const video = videoRef.current;
-    if (!video) return;
+    // Guard against capturing before a real frame has decoded — this is
+    // exactly what used to produce an all-black saved photo.
+    if (!video || !videoReady || video.readyState < 2 || !video.videoWidth || !video.videoHeight) {
+      setCaptureError("Camera isn't ready yet — give it a second and try again.");
+      return;
+    }
     const constrained = drawToConstrainedDataUrl(video, video.videoWidth, video.videoHeight);
     if (!constrained) {
       setCaptureError("Couldn't process this photo — try again.");
@@ -1345,6 +1360,22 @@ function IdentityCapture({ hasPhoto, onSave, onRemove, onAlsoSetProfilePhoto }) 
   const retake = () => {
     setCaptured(null);
     startCamera();
+  };
+
+  /** Back out of the live camera view entirely — stop the stream, no photo taken. */
+  const cancelLive = () => {
+    stopStream();
+    setVideoReady(false);
+    setCaptureError("");
+    setPhase("idle");
+  };
+
+  /** Discard a just-captured photo without saving it. */
+  const cancelCaptured = () => {
+    setCaptured(null);
+    setCaptureError("");
+    setUseAsProfilePhoto(true);
+    setPhase("idle");
   };
 
   const confirmSave = () => {
@@ -1380,14 +1411,32 @@ function IdentityCapture({ hasPhoto, onSave, onRemove, onAlsoSetProfilePhoto }) 
       )}
       {phase === "live" && (
         <div className="flex flex-col gap-2.5">
-          <video ref={videoRef} autoPlay playsInline muted className="w-full max-w-xs rounded-xl" style={{ background: "#000" }} />
-          <button
-            onClick={capture}
-            className="self-start text-xs px-3.5 py-2 rounded-full text-white transition-opacity hover:opacity-85"
-            style={{ background: C.ink, fontFamily: F, fontWeight: 600 }}
-          >
-            Capture
-          </button>
+          <video
+            ref={videoRef}
+            autoPlay
+            playsInline
+            muted
+            onLoadedData={() => setVideoReady(true)}
+            className="w-full max-w-xs rounded-xl"
+            style={{ background: "#000" }}
+          />
+          <div className="flex items-center gap-2">
+            <button
+              onClick={capture}
+              disabled={!videoReady}
+              className="self-start text-xs px-3.5 py-2 rounded-full text-white transition-opacity"
+              style={{ background: C.ink, fontFamily: F, fontWeight: 600, opacity: videoReady ? 1 : 0.45, cursor: videoReady ? "pointer" : "default" }}
+            >
+              {videoReady ? "Capture" : "Starting camera…"}
+            </button>
+            <button
+              onClick={cancelLive}
+              className="text-xs px-3.5 py-2 rounded-full transition-colors hover:bg-[#F4F4F5]"
+              style={{ border: `1px solid ${C.border}`, color: C.ink, fontFamily: F, fontWeight: 600 }}
+            >
+              Cancel
+            </button>
+          </div>
           {captureError && (
             <p className="text-[11.5px]" style={{ color: C.brickDark, fontFamily: F }}>{captureError}</p>
           )}
@@ -1405,6 +1454,13 @@ function IdentityCapture({ hasPhoto, onSave, onRemove, onAlsoSetProfilePhoto }) 
             Also use this as my profile photo
           </label>
           <div className="flex items-center gap-2">
+            <button
+              onClick={cancelCaptured}
+              className="text-xs px-3.5 py-2 rounded-full transition-colors hover:bg-[#F4F4F5]"
+              style={{ border: `1px solid ${C.border}`, color: C.ink, fontFamily: F, fontWeight: 600 }}
+            >
+              Cancel
+            </button>
             <button
               onClick={retake}
               className="flex items-center gap-1.5 text-xs px-3.5 py-2 rounded-full transition-colors hover:bg-[#F4F4F5]"
@@ -1724,7 +1780,10 @@ export default function ProfilePage() {
       </aside>
 
       {/* ---- right: content panel ---- */}
-      <section className="flex-1 min-w-0 px-8 py-8 sm:px-10 sm:py-9 overflow-y-auto" style={{ maxHeight: "90vh" }}>
+      <section
+        className="flex-1 min-w-0 px-8 py-8 sm:px-10 sm:py-9 overflow-y-auto overflow-x-hidden rk-scroll rounded-b-[22px] sm:rounded-bl-none sm:rounded-tr-[22px] sm:rounded-br-[22px]"
+        style={{ maxHeight: "90vh" }}
+      >
         {tab === "profile" ? (
           <>
             <h2 className="text-[20px] font-bold tracking-tight" style={{ color: C.ink, fontFamily: F }}>

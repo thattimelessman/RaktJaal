@@ -13,7 +13,7 @@ import {
   Check,
   X,
 } from "lucide-react";
-import { registerUser, loginUser } from "./AuthStore";
+import { registerUser, loginUser } from "./Authstore";
 
 const C = {
   ink: "#14110F",
