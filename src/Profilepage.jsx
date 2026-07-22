@@ -1313,10 +1313,22 @@ function IdentityCapture({ hasPhoto, onSave, onRemove, onAlsoSetProfilePhoto }) 
   // decoded a frame — capturing before that produces an all-black photo.
   // videoReady only flips true once a real frame has arrived.
   const [videoReady, setVideoReady] = useState(false);
+  // The MediaStream itself, held in state (not just a ref) so the attach
+  // effect below re-runs reliably once both the stream AND the <video>
+  // DOM node exist — this replaces a setTimeout(0) guess with an actual
+  // dependency-driven effect.
+  const [stream, setStream] = useState(null);
+  // Real diagnostics read off the live video track — not a guess. If the
+  // preview stays black, this tells us WHY: whether the browser itself
+  // has muted the track (usually another app/tab holding the camera),
+  // whether the track already ended, or whether it's genuinely still
+  // starting up.
+  const [trackDiag, setTrackDiag] = useState(null);
 
   const stopStream = () => {
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
+    setStream(null);
   };
 
   useEffect(() => stopStream, []); // cleanup on unmount
@@ -1325,19 +1337,86 @@ function IdentityCapture({ hasPhoto, onSave, onRemove, onAlsoSetProfilePhoto }) 
     setPhase("requesting");
     setCaptureError("");
     setVideoReady(false);
+    setTrackDiag(null);
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false });
-      streamRef.current = stream;
+      const newStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false });
+      streamRef.current = newStream;
       setPhase("live");
-      // videoRef isn't mounted until phase flips to "live" and this re-renders;
-      // attach on next tick.
-      setTimeout(() => {
-        if (videoRef.current) videoRef.current.srcObject = stream;
-      }, 0);
+      setStream(newStream);
     } catch {
       setPhase("denied");
     }
   };
+
+  // Attaches the stream once BOTH the video element is mounted (phase
+  // "live") and the stream exists, and explicitly starts playback —
+  // `autoplay` alone isn't reliable for a srcObject assigned after mount.
+  // Also wires up real track-level diagnostics.
+  useEffect(() => {
+    if (phase !== "live" || !stream) return;
+    const video = videoRef.current;
+    if (!video) return;
+
+    video.srcObject = stream;
+    const playPromise = video.play();
+    if (playPromise?.catch) {
+      playPromise.catch(() => {
+        setCaptureError('Camera preview couldn\'t start automatically — tap "Retry preview" below.');
+      });
+    }
+
+    const track = stream.getVideoTracks()[0];
+    const readDiag = () => {
+      if (!track) return;
+      setTrackDiag({ readyState: track.readyState, muted: track.muted, label: track.label });
+    };
+    readDiag();
+    track?.addEventListener("mute", readDiag);
+    track?.addEventListener("unmute", readDiag);
+    track?.addEventListener("ended", readDiag);
+    return () => {
+      track?.removeEventListener("mute", readDiag);
+      track?.removeEventListener("unmute", readDiag);
+      track?.removeEventListener("ended", readDiag);
+    };
+  }, [phase, stream]);
+
+  /** Retry does a full restart — a fresh getUserMedia call — rather than
+   *  just replaying .play() on the same track. If the browser has already
+   *  muted the current track (the common "another app has the camera"
+   *  case), replaying that same track rarely helps; a brand-new stream is
+   *  much more likely to actually succeed. */
+  const retryPreview = () => {
+    setCaptureError("");
+    stopStream();
+    setVideoReady(false);
+    setTrackDiag(null);
+    startCamera();
+  };
+
+  // Watchdog: the camera indicator light can be ON (hardware granted) while
+  // the <video> element never actually receives a decoded frame. Rather
+  // than hang on "Starting camera…" forever, surface what the track
+  // itself reports after a few seconds so the cause is visible, not guessed.
+  useEffect(() => {
+    if (phase !== "live" || videoReady) return;
+    const t = setTimeout(() => {
+      if (trackDiag?.muted) {
+        setCaptureError(
+          `The camera track is muted by the browser (label: "${trackDiag.label || "unknown"}") — this almost always means another app or browser tab currently has the camera open. Close any other app/tab using the camera (Zoom, Teams, Windows Camera app, another browser window), then hit "Retry preview".`
+        );
+      } else if (trackDiag?.readyState === "ended") {
+        setCaptureError("The camera track ended unexpectedly. Try \"Retry preview\", or fully reopen this page.");
+      } else if (!trackDiag) {
+        setCaptureError("Couldn't read the camera track at all — this browser may not support the camera API used here, or the stream never actually started. Try a different browser (Chrome or Edge).");
+      } else {
+        setCaptureError(
+          "Camera preview is taking a while — no picture is arriving even though the light is on. Try \"Retry preview\" below."
+        );
+      }
+    }, 4000);
+    return () => clearTimeout(t);
+  }, [phase, videoReady, trackDiag]);
 
   const capture = () => {
     const video = videoRef.current;
@@ -1392,11 +1471,11 @@ function IdentityCapture({ hasPhoto, onSave, onRemove, onAlsoSetProfilePhoto }) 
           <div className="flex items-center gap-2">
             <Camera size={14} color={C.sub} />
             <span className="text-sm" style={{ color: C.ink, fontFamily: F, fontWeight: 500 }}>
-              Photo saved to this device
+              Identity Photo Verified
             </span>
           </div>
         }
-        right={<KebabMenu items={[{ label: "Remove photo", danger: true, onClick: onRemove }, { label: "Retake", onClick: startCamera }]} />}
+        right={<KebabMenu items={[{ label: "Update photo", onClick: startCamera }, { label: "Remove", danger: true, onClick: onRemove }]} />}
       />
     );
   }
@@ -1438,7 +1517,16 @@ function IdentityCapture({ hasPhoto, onSave, onRemove, onAlsoSetProfilePhoto }) 
             </button>
           </div>
           {captureError && (
-            <p className="text-[11.5px]" style={{ color: C.brickDark, fontFamily: F }}>{captureError}</p>
+            <div className="flex items-start gap-2 flex-wrap">
+              <p className="text-[11.5px] flex-1 min-w-[180px]" style={{ color: C.brickDark, fontFamily: F }}>{captureError}</p>
+              <button
+                onClick={retryPreview}
+                className="shrink-0 text-[11.5px] px-3 py-1.5 rounded-full transition-colors hover:bg-[#F4F4F5]"
+                style={{ border: `1px solid ${C.border}`, color: C.ink, fontFamily: F, fontWeight: 600 }}
+              >
+                Retry preview
+              </button>
+            </div>
           )}
         </div>
       )}
