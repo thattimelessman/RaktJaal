@@ -166,6 +166,21 @@ function validateEmail(v) {
   return { valid: true, reason: "", normalized: trimmed.toLowerCase() };
 }
 
+/* Duplicate check — compares a candidate email (case-insensitive) against
+   BOTH the primary email and the secondary list. Previously
+   addSecondaryEmail only checked the secondary list, so the exact same
+   address as the primary email slipped through as a "duplicate" secondary
+   entry. Used by both the primary-email editor and the add-email editor,
+   so the check is symmetric in either direction. */
+function isDuplicateEmail(candidateNormalized, user, { excludePrimary = false, excludeSecondary = false } = {}) {
+  if (!excludePrimary && candidateNormalized === (user.email || "").trim().toLowerCase()) return true;
+  if (!excludeSecondary) {
+    const list = Array.isArray(user.secondaryEmails) ? user.secondaryEmails : [];
+    if (list.some((e) => e.trim().toLowerCase() === candidateNormalized)) return true;
+  }
+  return false;
+}
+
 /* Indian mobile numbers: 10 digits, first digit 6–9, with an optional
    +91 / 91 / 0 prefix and optional spaces or a single hyphen as separators.
    Landline / other-country numbers are intentionally out of scope — this
@@ -378,8 +393,9 @@ function Avatar({ photo, initials, size = 40 }) {
   );
 }
 
-/** Small hover/focus tooltip — used for the verified-donor badge. Keyboard accessible
- *  (shows on focus, not just mouseover) and dismisses on blur/mouse-leave. */
+/** Small hover/focus tooltip — used for the verified-donor badge and the
+ *  new phone-verified badge. Keyboard accessible (shows on focus, not
+ *  just mouseover) and dismisses on blur/mouse-leave. */
 function Tooltip({ label, sub, children }) {
   const [show, setShow] = useState(false);
   return (
@@ -938,6 +954,190 @@ function AddressEditor({ value, onSave, onCancel }) {
 }
 
 /* ---------------------------------------------------------------
+   Local one-time-code panels
+   ---------------------------------------------------------------
+   Three flows in this file now use the same honest pattern: RaktJaal has
+   no backend and no way to actually send an SMS or email, so instead of
+   pretending to, each panel generates a 6-digit code, shows it directly
+   on screen, and requires the person to type it back before the action
+   completes. It's a deliberate confirmation speed bump, not real
+   out-of-band verification — the copy says so plainly in each case.
+------------------------------------------------------------------ */
+
+/**
+ * Account-deletion confirmation using a locally-generated 6-digit code.
+ */
+function CodeConfirmDelete({ onConfirm, onCancel }) {
+  const [code] = useState(() => String(Math.floor(100000 + Math.random() * 900000)));
+  const [input, setInput] = useState("");
+  const matches = input.trim() === code;
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div>
+        <p className="text-sm" style={{ color: C.ink, fontFamily: F, fontWeight: 600 }}>
+          Type this code to confirm deletion
+        </p>
+        <p className="text-[12px] mt-1 max-w-sm" style={{ color: C.sub, fontFamily: F }}>
+          RaktJaal has no email service yet, so this can't be a real emailed OTP — it's a local confirmation code shown right here, meant only to stop an accidental click.
+        </p>
+      </div>
+      <div className="flex items-center gap-3">
+        <span
+          className="px-4 py-2 rounded-lg text-lg tracking-[0.3em] font-bold"
+          style={{ background: C.chip, color: C.ink, fontFamily: "monospace" }}
+        >
+          {code}
+        </span>
+      </div>
+      <input
+        value={input}
+        onChange={(e) => setInput(e.target.value.replace(/\D/g, "").slice(0, 6))}
+        inputMode="numeric"
+        placeholder="Enter the 6-digit code above"
+        className="w-full max-w-xs text-sm bg-transparent outline-none border-b pb-1"
+        style={{ color: C.ink, fontFamily: F, fontWeight: 500, borderColor: C.ink }}
+      />
+      <div className="flex items-center gap-2">
+        <button
+          onClick={onCancel}
+          className="text-xs px-3.5 py-2 rounded-full transition-colors hover:bg-[#F4F4F5]"
+          style={{ border: `1px solid ${C.border}`, color: C.ink, fontFamily: F, fontWeight: 600 }}
+        >
+          Cancel
+        </button>
+        <button
+          onClick={onConfirm}
+          disabled={!matches}
+          className="text-xs px-3.5 py-2 rounded-full text-white transition-opacity"
+          style={{ background: C.brickDark, fontFamily: F, fontWeight: 600, opacity: matches ? 1 : 0.4 }}
+        >
+          Confirm delete
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Two-step verification setup. Previously "Add two-step verification"
+ * flipped the flag straight to true with no verification step at all, and
+ * the enabled state permanently claimed "one-time codes sent to your
+ * email" — a claim this app can't back since there's no email backend.
+ * Now: a local code is shown, the person has to type it back to enable,
+ * and once enabled the row just says "Enabled" — no ongoing claim about
+ * how codes get delivered.
+ */
+function TwoFactorSetup({ onVerified, onCancel }) {
+  const [code] = useState(() => String(Math.floor(100000 + Math.random() * 900000)));
+  const [input, setInput] = useState("");
+  const matches = input.trim() === code;
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div>
+        <p className="text-sm" style={{ color: C.ink, fontFamily: F, fontWeight: 600 }}>
+          Enter this code to confirm two-step verification
+        </p>
+        <p className="text-[12px] mt-1 max-w-sm" style={{ color: C.sub, fontFamily: F }}>
+          RaktJaal has no email service yet, so this can't be a real emailed code — it's shown right here as a stand-in confirmation step.
+        </p>
+      </div>
+      <span
+        className="px-4 py-2 rounded-lg text-lg tracking-[0.3em] font-bold w-fit"
+        style={{ background: C.chip, color: C.ink, fontFamily: "monospace" }}
+      >
+        {code}
+      </span>
+      <input
+        value={input}
+        onChange={(e) => setInput(e.target.value.replace(/\D/g, "").slice(0, 6))}
+        inputMode="numeric"
+        placeholder="Enter the 6-digit code above"
+        className="w-full max-w-xs text-sm bg-transparent outline-none border-b pb-1"
+        style={{ color: C.ink, fontFamily: F, fontWeight: 500, borderColor: C.ink }}
+      />
+      <div className="flex items-center gap-2">
+        <button
+          onClick={onCancel}
+          className="text-xs px-3.5 py-2 rounded-full transition-colors hover:bg-[#F4F4F5]"
+          style={{ border: `1px solid ${C.border}`, color: C.ink, fontFamily: F, fontWeight: 600 }}
+        >
+          Cancel
+        </button>
+        <button
+          onClick={onVerified}
+          disabled={!matches}
+          className="text-xs px-3.5 py-2 rounded-full text-white transition-opacity"
+          style={{ background: C.ink, fontFamily: F, fontWeight: 600, opacity: matches ? 1 : 0.4 }}
+        >
+          Verify & enable
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Phone number OTP verification. Shown right after saving a new phone
+ * number in the Contact details row — the number isn't actually stored as
+ * the profile's phone until this code is confirmed. Same honesty pattern
+ * as above: local code, shown on screen, no real SMS. Once a given number
+ * has been verified this way, ProfilePage remembers it (`verifiedPhone`)
+ * so re-saving the *same* number later skips straight through — this step
+ * only fires for a number that hasn't been verified before.
+ */
+function PhoneOtpVerify({ phone, onVerified, onCancel }) {
+  const [code] = useState(() => String(Math.floor(100000 + Math.random() * 900000)));
+  const [input, setInput] = useState("");
+  const matches = input.trim() === code;
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div>
+        <p className="text-sm" style={{ color: C.ink, fontFamily: F, fontWeight: 600 }}>
+          Enter the code to verify {phone}
+        </p>
+        <p className="text-[12px] mt-1 max-w-sm" style={{ color: C.sub, fontFamily: F }}>
+          RaktJaal has no SMS service yet, so this can't be a real text message — it's a local confirmation code shown right here. This is a one-time check for this number; once verified you won't be asked again unless you change it.
+        </p>
+      </div>
+      <span
+        className="px-4 py-2 rounded-lg text-lg tracking-[0.3em] font-bold w-fit"
+        style={{ background: C.chip, color: C.ink, fontFamily: "monospace" }}
+      >
+        {code}
+      </span>
+      <input
+        value={input}
+        onChange={(e) => setInput(e.target.value.replace(/\D/g, "").slice(0, 6))}
+        inputMode="numeric"
+        placeholder="Enter the 6-digit code above"
+        className="w-full max-w-xs text-sm bg-transparent outline-none border-b pb-1"
+        style={{ color: C.ink, fontFamily: F, fontWeight: 500, borderColor: C.ink }}
+      />
+      <div className="flex items-center gap-2">
+        <button
+          onClick={onCancel}
+          className="text-xs px-3.5 py-2 rounded-full transition-colors hover:bg-[#F4F4F5]"
+          style={{ border: `1px solid ${C.border}`, color: C.ink, fontFamily: F, fontWeight: 600 }}
+        >
+          Cancel
+        </button>
+        <button
+          onClick={onVerified}
+          disabled={!matches}
+          className="text-xs px-3.5 py-2 rounded-full text-white transition-opacity"
+          style={{ background: C.ink, fontFamily: F, fontWeight: 600, opacity: matches ? 1 : 0.4 }}
+        >
+          Verify number
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------
    Donation history
 ------------------------------------------------------------------ */
 /**
@@ -1239,69 +1439,6 @@ function IdentityCapture({ hasPhoto, onSave, onRemove, onAlsoSetProfilePhoto }) 
   );
 }
 
-/**
- * Account-deletion confirmation using a locally-generated 6-digit code.
- *
- * Honesty note: this app has no backend and no way to actually send email —
- * see Authstore.js. A real emailed OTP isn't possible here without one, and
- * faking that an email was sent (while just showing the code on-screen)
- * would be actively misleading. So this is deliberately framed as what it
- * really is: a friction step against misclicks, not a real out-of-band
- * verification. The code is shown directly in the UI, not hidden — pretending
- * otherwise would be theater, not security.
- */
-function CodeConfirmDelete({ onConfirm, onCancel }) {
-  const [code] = useState(() => String(Math.floor(100000 + Math.random() * 900000)));
-  const [input, setInput] = useState("");
-  const matches = input.trim() === code;
-
-  return (
-    <div className="flex flex-col gap-3">
-      <div>
-        <p className="text-sm" style={{ color: C.ink, fontFamily: F, fontWeight: 600 }}>
-          Type this code to confirm deletion
-        </p>
-        <p className="text-[12px] mt-1 max-w-sm" style={{ color: C.sub, fontFamily: F }}>
-          RaktJaal has no email service yet, so this can't be a real emailed OTP — it's a local confirmation code shown right here, meant only to stop an accidental click.
-        </p>
-      </div>
-      <div className="flex items-center gap-3">
-        <span
-          className="px-4 py-2 rounded-lg text-lg tracking-[0.3em] font-bold"
-          style={{ background: C.chip, color: C.ink, fontFamily: "monospace" }}
-        >
-          {code}
-        </span>
-      </div>
-      <input
-        value={input}
-        onChange={(e) => setInput(e.target.value.replace(/\D/g, "").slice(0, 6))}
-        inputMode="numeric"
-        placeholder="Enter the 6-digit code above"
-        className="w-full max-w-xs text-sm bg-transparent outline-none border-b pb-1"
-        style={{ color: C.ink, fontFamily: F, fontWeight: 500, borderColor: C.ink }}
-      />
-      <div className="flex items-center gap-2">
-        <button
-          onClick={onCancel}
-          className="text-xs px-3.5 py-2 rounded-full transition-colors hover:bg-[#F4F4F5]"
-          style={{ border: `1px solid ${C.border}`, color: C.ink, fontFamily: F, fontWeight: 600 }}
-        >
-          Cancel
-        </button>
-        <button
-          onClick={onConfirm}
-          disabled={!matches}
-          className="text-xs px-3.5 py-2 rounded-full text-white transition-opacity"
-          style={{ background: C.brickDark, fontFamily: F, fontWeight: 600, opacity: matches ? 1 : 0.4 }}
-        >
-          Confirm delete
-        </button>
-      </div>
-    </div>
-  );
-}
-
 /** Decorative animated backdrop behind the dialog card — soft drifting
  *  gradient blobs plus a faint dot-grid, meant to read as illustrated
  *  digital art rather than a literal photo or video. Purely visual:
@@ -1426,6 +1563,8 @@ export default function ProfilePage() {
   const [savedFlash, setSavedFlash] = useState(false);
   const [editingKey, setEditingKey] = useState(null); // "name" | "email" | "phone" | "address" | "addEmail"
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [settingUpTwoFactor, setSettingUpTwoFactor] = useState(false);
+  const [pendingPhone, setPendingPhone] = useState(null); // phone number awaiting OTP confirmation
   const device = useMemo(() => readDeviceInfo(), []);
   const [sessionStart] = useState(() => new Date());
 
@@ -1447,6 +1586,16 @@ export default function ProfilePage() {
     flashSaved();
   };
 
+  // Same as updateField but for saving several fields together in one go —
+  // used by phone verification, which needs to set phone + phoneVerified +
+  // verifiedPhone atomically rather than as three separate renders.
+  const updateFields = (patch) => {
+    const updated = { ...user, ...patch };
+    saveCurrentUser(patch);
+    setUser(updated);
+    flashSaved();
+  };
+
   const saveAddress = (addr) => {
     updateField("address", addr);
     setEditingKey(null);
@@ -1457,8 +1606,15 @@ export default function ProfilePage() {
       setEditingKey(null);
       return;
     }
+    // Defensive backstop — the InlineEditor's validate() below already
+    // blocks duplicates before onSave ever fires, but this keeps the
+    // function safe to call from anywhere.
+    if (isDuplicateEmail(email, user)) {
+      setEditingKey(null);
+      return;
+    }
     const list = Array.isArray(user.secondaryEmails) ? user.secondaryEmails : [];
-    if (!list.includes(email)) updateField("secondaryEmails", [...list, email]);
+    updateField("secondaryEmails", [...list, email]);
     setEditingKey(null);
   };
 
@@ -1495,6 +1651,7 @@ export default function ProfilePage() {
     ? user.name.trim().split(/\s+/).slice(0, 2).map((p) => p[0]?.toUpperCase()).join("")
     : "?";
   const secondaryEmails = Array.isArray(user.secondaryEmails) ? user.secondaryEmails : [];
+  const phoneIsVerified = Boolean(user.phone && user.phoneVerified && user.verifiedPhone === user.phone);
 
   const NAV = [
     { key: "profile", label: "Profile", icon: User },
@@ -1674,7 +1831,16 @@ export default function ProfilePage() {
                       value={user.email}
                       type="email"
                       placeholder="name@example.com"
-                      validate={(v) => validateEmail(v)}
+                      validate={(v) => {
+                        const base = validateEmail(v);
+                        if (!base.valid) return base;
+                        // Block saving the primary email as a value that's
+                        // already sitting in the secondary list.
+                        if (isDuplicateEmail(base.normalized, user, { excludePrimary: true })) {
+                          return { valid: false, reason: "That email is already saved as a secondary address.", normalized: base.normalized };
+                        }
+                        return base;
+                      }}
                       onSave={(v) => {
                         updateField("email", v);
                         setEditingKey(null);
@@ -1696,7 +1862,25 @@ export default function ProfilePage() {
                 </div>
                 {editingKey === "addEmail" ? (
                   <div className="mt-2.5">
-                    <InlineEditor value="" type="email" placeholder="name@example.com" validate={(v) => validateEmail(v)} onSave={addSecondaryEmail} onCancel={() => setEditingKey(null)} />
+                    <InlineEditor
+                      value=""
+                      type="email"
+                      placeholder="name@example.com"
+                      validate={(v) => {
+                        const base = validateEmail(v);
+                        if (!base.valid) return base;
+                        // The actual fix: check the candidate against BOTH
+                        // the primary email and the existing secondary list,
+                        // not just the secondary list — this is what let the
+                        // same address be entered as primary and secondary.
+                        if (isDuplicateEmail(base.normalized, user)) {
+                          return { valid: false, reason: "That email is already on this account.", normalized: base.normalized };
+                        }
+                        return base;
+                      }}
+                      onSave={addSecondaryEmail}
+                      onCancel={() => setEditingKey(null)}
+                    />
                   </div>
                 ) : (
                   <GhostAdd label="Add email address" onClick={() => setEditingKey("addEmail")} />
@@ -1707,15 +1891,57 @@ export default function ProfilePage() {
               <Row label="Contact details">
                 <div className="flex flex-col gap-3.5">
                   <div>
-                    {editingKey !== "phone" ? (
+                    {editingKey === "phone" ? (
+                      pendingPhone ? (
+                        <PhoneOtpVerify
+                          phone={pendingPhone}
+                          onVerified={() => {
+                            updateFields({ phone: pendingPhone, phoneVerified: true, verifiedPhone: pendingPhone });
+                            setPendingPhone(null);
+                            setEditingKey(null);
+                          }}
+                          onCancel={() => {
+                            setPendingPhone(null);
+                            setEditingKey(null);
+                          }}
+                        />
+                      ) : (
+                        <InlineEditor
+                          value={user.phone}
+                          type="tel"
+                          placeholder="+91 98765 43210"
+                          validate={(v) => validatePhone(v)}
+                          onSave={(v) => {
+                            // Already verified this exact number before —
+                            // this is the "one-time" part: skip OTP entirely.
+                            if (v === user.verifiedPhone && user.phoneVerified) {
+                              updateField("phone", v);
+                              setEditingKey(null);
+                              return;
+                            }
+                            // New or previously-unverified number — hold off
+                            // on saving it as the real phone until OTP passes.
+                            setPendingPhone(v);
+                          }}
+                          onCancel={() => setEditingKey(null)}
+                        />
+                      )
+                    ) : (
                       <RowItem
                         left={
                           <div className="flex items-center gap-2">
                             <Phone size={13} color={C.sub} />
                             {user.phone ? (
-                              <span className="text-sm" style={{ color: C.ink, fontFamily: F, fontWeight: 500 }}>
-                                {user.phone}
-                              </span>
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-sm" style={{ color: C.ink, fontFamily: F, fontWeight: 500 }}>
+                                  {user.phone}
+                                </span>
+                                {phoneIsVerified && (
+                                  <Tooltip label="Phone verified" sub="Confirmed via one-time code">
+                                    <ShieldCheck size={13} color={C.brick} className="cursor-default" />
+                                  </Tooltip>
+                                )}
+                              </div>
                             ) : (
                               <span className="text-sm italic" style={{ color: C.sub, fontFamily: F }}>
                                 No phone number
@@ -1724,18 +1950,6 @@ export default function ProfilePage() {
                           </div>
                         }
                         right={<KebabMenu items={[{ label: "Edit phone number", onClick: () => setEditingKey("phone") }]} />}
-                      />
-                    ) : (
-                      <InlineEditor
-                        value={user.phone}
-                        type="tel"
-                        placeholder="+91 98765 43210"
-                        validate={(v) => validatePhone(v)}
-                        onSave={(v) => {
-                          updateField("phone", v);
-                          setEditingKey(null);
-                        }}
-                        onCancel={() => setEditingKey(null)}
                       />
                     )}
                   </div>
@@ -1816,20 +2030,28 @@ export default function ProfilePage() {
             <div className="mt-2">
               {/* Two-step verification */}
               <Row label="Two-step verification">
-                {!user.twoFactorEnabled ? (
-                  <GhostAdd label="Add two-step verification" onClick={() => updateField("twoFactorEnabled", true)} />
-                ) : (
+                {user.twoFactorEnabled ? (
                   <RowItem
                     left={
                       <div className="flex items-center gap-2">
                         <ShieldCheck size={14} color={C.brick} />
                         <span className="text-sm" style={{ color: C.ink, fontFamily: F, fontWeight: 500 }}>
-                          Enabled — one-time codes sent to your email
+                          Enabled
                         </span>
                       </div>
                     }
                     right={<KebabMenu items={[{ label: "Turn off", danger: true, onClick: () => updateField("twoFactorEnabled", false) }]} />}
                   />
+                ) : settingUpTwoFactor ? (
+                  <TwoFactorSetup
+                    onVerified={() => {
+                      updateField("twoFactorEnabled", true);
+                      setSettingUpTwoFactor(false);
+                    }}
+                    onCancel={() => setSettingUpTwoFactor(false)}
+                  />
+                ) : (
+                  <GhostAdd label="Add two-step verification" onClick={() => setSettingUpTwoFactor(true)} />
                 )}
               </Row>
 
