@@ -249,7 +249,7 @@ function LoginForm({ onSwitch }) {
     // their own saved profile if known, or starts a fresh empty one
     // if not. Never reuses another email's leftover data.
     loginUser(email);
-    navigate("/profile");
+    navigate("/action");
   };
 
   return (
@@ -331,7 +331,7 @@ function RegisterForm({ onSwitch }) {
       city: form.city,
       bloodType: form.bloodType,
     });
-    navigate("/profile");
+    navigate("/action");
   };
 
   return (
