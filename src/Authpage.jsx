@@ -12,6 +12,7 @@ import {
   ShieldCheck,
   Check,
   X,
+  CalendarDays
 } from "lucide-react";
 import { registerUser, loginUser } from "./Authstore";
 
@@ -304,7 +305,7 @@ function LoginForm({ onSwitch }) {
 
 function RegisterForm({ onSwitch }) {
   const navigate = useNavigate();
-  const [form, setForm] = useState({ name: "", email: "", city: "", bloodType: "O+", password: "" });
+ const [form, setForm] = useState({ name: "", dob: "", email: "", city: "", bloodType: "O+", password: "" });
   const [touched, setTouched] = useState(false);
   const [shake, setShake] = useState(false);
 
@@ -313,7 +314,8 @@ function RegisterForm({ onSwitch }) {
   const emailCheck = useMemo(() => validateEmail(form.email), [form.email]);
   const checks = passwordChecks(form.password);
   const passwordValid = checks.length && checks.upper && checks.number && checks.symbol;
-  const canSubmit = form.name.trim() && emailCheck.valid && form.city.trim() && passwordValid;
+  
+  const canSubmit = form.name.trim() && form.dob && emailCheck.valid && form.city.trim() && passwordValid;
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -327,6 +329,7 @@ function RegisterForm({ onSwitch }) {
     // to hash it, so it isn't persisted anywhere, even locally.
     registerUser({
       name: form.name,
+      dob: form.dob,
       email: form.email,
       city: form.city,
       bloodType: form.bloodType,
@@ -347,6 +350,24 @@ function RegisterForm({ onSwitch }) {
 
       <div className="flex flex-col gap-3.5">
         <Field icon={User} required value={form.name} onChange={update("name")} placeholder="Full name" />
+        <div className="relative">
+          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+            <CalendarDays size={18} color="#A1A1AA" />
+          </div>
+          <input
+            type="date"
+            name="dob"
+            value={form.dob || ""}
+            onChange={update("dob")}
+            className="w-full pl-10 pr-4 py-3 rounded-2xl text-sm outline-none transition-colors"
+            style={{
+              backgroundColor: "#FFFFFF",
+              border: `1.5px solid ${C.ink}22`,
+              color: form.dob ? C.ink : "#A1A1AA", 
+              fontFamily: FB
+            }}
+          />
+        </div>
         <Field
           icon={Mail}
           type="email"

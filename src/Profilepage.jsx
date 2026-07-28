@@ -23,6 +23,7 @@ import {
   Camera,
   RotateCcw,
   Loader2,
+  CalendarDays
 } from "lucide-react";
 
 /* ---------------------------------------------------------------
@@ -158,6 +159,38 @@ function validateName(v) {
     return { valid: false, reason: "Use letters, spaces, hyphens, or apostrophes only.", normalized: trimmed };
   }
   return { valid: true, reason: "", normalized: trimmed.replace(/\s+/g, " ") };
+}
+
+function formatDOBDisplay(yyyy_mm_dd) {
+  if (!yyyy_mm_dd) return "";
+  const [y, m, d] = yyyy_mm_dd.split("-");
+  return `${d}/${m}/${y}`;
+}
+
+function validateDOB(v) {
+  if (!v) return { valid: false, reason: "Date of birth is required.", normalized: v };
+  
+  const today = new Date();
+  const birthDate = new Date(v);
+  
+  if (isNaN(birthDate.getTime())) {
+    return { valid: false, reason: "Please enter a valid date.", normalized: v };
+  }
+
+  let age = today.getFullYear() - birthDate.getFullYear();
+  const m = today.getMonth() - birthDate.getMonth();
+  if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
+    age--;
+  }
+
+  if (age < 18) {
+    return { valid: false, reason: "You must be at least 18 years old to donate blood safely.", normalized: v };
+  }
+  if (age > 100) {
+    return { valid: false, reason: "Please verify the year you entered.", normalized: v };
+  }
+  
+  return { valid: true, reason: "", normalized: v };
 }
 
 /* General-purpose email check — RFC-reasonable, not restricted to a
@@ -330,6 +363,7 @@ function formatAddress(addr) {
 
 const REQUIRED_FIELDS = [
   { key: "name", label: "Full name" },
+  { key: "dob", label: "Date of birth" },
   { key: "phone", label: "Phone number" },
   { key: "address", label: "Address" },
   { key: "bloodType", label: "Blood type" },
@@ -648,6 +682,7 @@ function InlineEditor({ value, placeholder, type = "text", validate, onSave, onC
     </div>
   );
 }
+
 
 /**
  * Profile-photo uploader — separate from the camera-based IdentityCapture
@@ -1979,6 +2014,41 @@ export default function ProfilePage() {
                       onCancel={() => setEditingKey(null)}
                     />
                   </div>
+                )}
+              </Row>
+
+              {/* Date of Birth row */}
+              <Row label="Date of birth">
+                {editingKey !== "dob" ? (
+                  <RowItem
+                    left={
+                      <div className="flex items-center gap-2">
+                        <CalendarDays size={13} color={C.sub} />
+                        {user.dob ? (
+                          <span className="text-sm" style={{ color: C.ink, fontFamily: F, fontWeight: 500 }}>
+                            {formatDOBDisplay(user.dob)}
+                          </span>
+                        ) : (
+                          <span className="text-sm italic" style={{ color: C.sub, fontFamily: F }}>
+                            Not added yet
+                          </span>
+                        )}
+                      </div>
+                    }
+                    right={<KebabMenu items={[{ label: "Edit date of birth", onClick: () => setEditingKey("dob") }]} />}
+                  />
+                ) : (
+                  <InlineEditor
+                    value={user.dob}
+                    type="date"
+                    placeholder="dd/mm/yyyy"
+                    validate={validateDOB}
+                    onSave={(v) => {
+                      updateField("dob", v);
+                      setEditingKey(null);
+                    }}
+                    onCancel={() => setEditingKey(null)}
+                  />
                 )}
               </Row>
 
