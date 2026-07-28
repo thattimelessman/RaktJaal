@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import {
   Paperclip,
   ArrowUp,
@@ -26,6 +26,9 @@ const FONT_IMPORT = `
 @keyframes pulseRing { 0% { transform: scale(0.9); opacity: 0.6; } 70% { transform: scale(1.6); opacity: 0; } 100% { opacity: 0; } }
 @keyframes dash { to { stroke-dashoffset: 0; } }
 @keyframes fadeUp { from { opacity: 0; transform: translateY(22px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes dropFall { 0% { transform: translate(-50%, -160%) scale(0.6); opacity: 0; } 40% { opacity: 1; } 100% { transform: translate(-50%, 40%) scale(1); opacity: 0; } }
+@keyframes dropRipple { 0% { transform: translate(-50%, -50%) scale(0); opacity: 0.45; } 100% { transform: translate(-50%, -50%) scale(6); opacity: 0; } }
+@keyframes fillWash { from { transform: translateY(100%); } to { transform: translateY(0%); } }
 `;
 
 const C = {
@@ -658,6 +661,116 @@ function FAQ() {
   );
 }
 
+/* get started function for button*/
+
+function GetStartedButton() {
+  const navigate = useNavigate();
+  // Renamed to 'isActive' to encompass both mouse hover and keyboard focus
+  const [isActive, setIsActive] = useState(false);
+  const [isNavigating, setIsNavigating] = useState(false);
+  const timeoutRef = useRef(null);
+
+  const drops = [
+    { left: "18%", delay: "0s", size: 6 },
+    { left: "35%", delay: "0.15s", size: 5 },
+    { left: "52%", delay: "0.3s", size: 7 },
+    { left: "68%", delay: "0.1s", size: 5 },
+    { left: "83%", delay: "0.25s", size: 6 },
+  ];
+
+  // Cleanup timeout to prevent memory leaks if component unmounts early
+  useEffect(() => {
+    return () => {
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    };
+  }, []);
+
+  const handleClick = (e) => {
+    e.preventDefault();
+    if (isNavigating) return;
+    
+    setIsNavigating(true);
+    setIsActive(false); // Cleanly stop the droplet animation
+    
+    // Add slight buffer (20ms) over the 500ms animation
+    timeoutRef.current = setTimeout(() => {
+      navigate("/register");
+    }, 520);
+  };
+
+  return (
+    <button
+      onClick={handleClick}
+      onMouseEnter={() => setIsActive(true)}
+      onMouseLeave={() => setIsActive(false)}
+      onFocus={() => setIsActive(true)}
+      onBlur={() => setIsActive(false)}
+      disabled={isNavigating}
+      className={`
+        relative overflow-hidden px-7 py-3 rounded-full text-sm text-white 
+        transition-transform duration-200
+        focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-white/50
+        ${!isNavigating ? 'hover:scale-[1.04] active:scale-95 cursor-pointer' : 'cursor-default'}
+      `}
+      style={{ 
+        background: C.brick, 
+        fontFamily: FB, 
+        fontWeight: 600 
+      }}
+      aria-live="polite"
+    >
+      {/* multiple subtle droplets falling in on hover/focus, staggered */}
+      {isActive && !isNavigating && drops.map((d, i) => (
+        <span
+          key={i}
+          className="absolute top-0 rounded-full pointer-events-none"
+          style={{
+            left: d.left,
+            width: d.size,
+            height: d.size * 1.3,
+            background: "#fff",
+            opacity: 0.5,
+            animation: `dropFall 1s ease-in ${d.delay} infinite`,
+          }}
+          aria-hidden="true"
+        />
+      ))}
+
+      {/* click: a red wash rises to fill/confirm before navigating */}
+      {isNavigating && (
+        <span
+          className="absolute inset-0 pointer-events-none"
+          style={{ 
+            background: C.brickDark, 
+            animation: "fillWash 0.5s cubic-bezier(.22,.61,.36,1) forwards" 
+          }}
+          aria-hidden="true"
+        />
+      )}
+
+      {/* click: ripple ring from the center */}
+      {isNavigating && (
+        <span
+          // Added translate rules to truly center the ripple origin
+          className="absolute left-1/2 top-1/2 rounded-full pointer-events-none -translate-x-1/2 -translate-y-1/2"
+          style={{ 
+            background: "#fff", 
+            width: "16px",
+            height: "16px",
+            animation: "dropRipple 0.5s ease-out forwards" 
+          }}
+          aria-hidden="true"
+        />
+      )}
+
+      {/* Added min-width to prevent button jumping when text length changes, and z-10 to stay above wash */}
+      <span className="relative z-10 flex items-center justify-center min-w-[110px]">
+        {isNavigating ? "Taking you there…" : "Get Started"}
+      </span>
+    </button>
+  );
+}
+
 /* ---------------- CTA ---------------- */
 
 function CTA() {
@@ -672,12 +785,7 @@ function CTA() {
           Try the coverage check above, or reach out if you want to help pilot RaktJaal in your city.
         </p>
         <div className="mt-7 flex items-center justify-center gap-3">
-          <Link to="/register" className="px-6 py-3 rounded-full text-sm text-white transition-transform hover:scale-[1.04] active:scale-95" style={{ background: C.brick, fontFamily: FB, fontWeight: 600 }}>
-            Get Started
-          </Link>
-          <a href="mailto:glactrocipher@gmail.com" className="px-6 py-3 rounded-full text-sm transition-colors hover:bg-white" style={{ border: `1px solid ${C.ink}33`, color: C.ink, fontFamily: FB, fontWeight: 600 }}>
-            Contact the team
-          </a>
+          <GetStartedButton />
         </div>
       </Reveal>
     </section>
