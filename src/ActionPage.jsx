@@ -624,8 +624,8 @@ function InboxPanel({ threads, activeThreadId, onSelectThread, onSend, onBack })
   const [draft, setDraft] = useState("");
   const active = threads.find((t) => t.id === activeThreadId);
   const scrollRef = useRef(null);
-  const cameraInputRef = useRef(null);
   const fileInputRef = useRef(null);
+  const [showCamera, setShowCamera] = useState(false);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
@@ -724,11 +724,10 @@ function InboxPanel({ threads, activeThreadId, onSelectThread, onSend, onBack })
               )}
             </div>
             <div className="flex items-center gap-1.5 px-4 py-3.5" style={{ borderTop: `1px solid ${C.border}` }}>
-              <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" hidden onChange={(e) => handleAttachment(e, "camera")} />
               <input ref={fileInputRef} type="file" hidden onChange={(e) => handleAttachment(e, "file")} />
               <button
-                onClick={() => cameraInputRef.current?.click()}
-                aria-label="Take or attach a photo"
+                onClick={() => setShowCamera(true)}
+                aria-label="Take a photo"
                 className="w-9 h-9 rounded-full flex items-center justify-center shrink-0 transition-colors hover:bg-[#F4F4F5]"
               >
                 <Camera size={16} color={C.sub} />
@@ -765,10 +764,83 @@ function InboxPanel({ threads, activeThreadId, onSelectThread, onSend, onBack })
           </div>
         )}
       </div>
+
+      {showCamera && (
+        <CameraModal
+          onCapture={(dataUrl) => { onSend(active.id, dataUrl); setShowCamera(false); }}
+          onClose={() => setShowCamera(false)}
+        />
+      )}
     </div>
   );
 }
 
+/*camera model function for camera in chat */
+
+
+function CameraModal({ onCapture, onClose }) {
+  const videoRef = useRef(null);
+  const streamRef = useRef(null);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    let active = true;
+    navigator.mediaDevices
+      ?.getUserMedia({ video: { facingMode: "environment" } })
+      .then((s) => {
+        if (!active) { s.getTracks().forEach((t) => t.stop()); return; }
+        streamRef.current = s;
+        if (videoRef.current) videoRef.current.srcObject = s;
+      })
+      .catch(() => setError("Camera access was denied or unavailable."));
+    return () => {
+      active = false;
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    };
+  }, []);
+
+  const capture = () => {
+    const video = videoRef.current;
+    if (!video) return;
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext("2d").drawImage(video, 0, 0);
+    onCapture(canvas.toDataURL("image/jpeg", 0.9));
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
+      style={{ background: "rgba(0,0,0,0.85)" }}
+      onClick={onClose}
+    >
+      <div className="w-full max-w-md rounded-[24px] bg-white p-5" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-[15px] font-bold" style={{ color: C.ink, fontFamily: F }}>Take a photo</h3>
+          <button onClick={onClose} aria-label="Close camera" className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-[#F4F4F5]">
+            <X size={15} color={C.sub} />
+          </button>
+        </div>
+        {error ? (
+          <p className="text-sm py-8 text-center" style={{ color: C.sub, fontFamily: F }}>{error}</p>
+        ) : (
+          <>
+            <video ref={videoRef} autoPlay playsInline className="w-full rounded-2xl bg-black" />
+            <button
+              onClick={capture}
+              className="mt-4 w-full py-3 rounded-full text-sm text-white"
+              style={{ background: C.ink, fontFamily: F, fontWeight: 700 }}
+            >
+              Capture
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
 /* ---------------------------------------------------------------
    NEED BLOOD flow: pick blood type -> pick location -> donor list
    -> request -> wait for approval -> contact unlocks + chat opens
@@ -1031,7 +1103,7 @@ function DonateBloodFlow({ incoming, onApprove, onDecline, onOpenThread }) {
             return (
               <div
                 key={r.id}
-                className="rounded-2xl overflow-hidden transition-shadow"
+                className="rounded-2xl transition-shadow"
                 style={{ border: `1px solid ${C.border}`, background: "#fff", boxShadow: "0 1px 2px rgba(0,0,0,0.02)" }}
               >
                 <div className="flex items-center gap-3.5 px-4.5 py-4">
@@ -1059,7 +1131,7 @@ function DonateBloodFlow({ incoming, onApprove, onDecline, onOpenThread }) {
                   </button>
                 </div>
 
-                <div className="flex items-center gap-2 px-4.5 py-3.5" style={{ borderTop: `1px solid ${C.border}`, background: C.sidebar }}>
+                <div className="flex items-center gap-2 px-4.5 py-3.5 rounded-b-2xl" style={{ borderTop: `1px solid ${C.border}`, background: C.sidebar }}>
                   {r.status === "approved" ? (
                     <>
                       <span className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full" style={{ background: C.mint, color: C.forest, fontFamily: F, fontWeight: 700 }}>

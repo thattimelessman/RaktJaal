@@ -684,10 +684,60 @@ function CTA() {
   );
 }
 
+
+
+/* for github and linkedin icons*/
+function GithubIcon({ size = 15, color = "#fff", opacity = 1 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill={color} opacity={opacity}>
+      <path d="M12 .5C5.73.5.5 5.73.5 12c0 5.09 3.29 9.4 7.86 10.93.58.11.79-.25.79-.56 0-.28-.01-1.02-.02-2-3.2.7-3.88-1.54-3.88-1.54-.53-1.34-1.29-1.7-1.29-1.7-1.05-.72.08-.71.08-.71 1.17.08 1.78 1.2 1.78 1.2 1.03 1.77 2.71 1.26 3.37.96.1-.75.4-1.26.73-1.55-2.55-.29-5.23-1.28-5.23-5.69 0-1.26.45-2.29 1.19-3.09-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.18 1.18a11.06 11.06 0 0 1 5.79 0c2.2-1.49 3.18-1.18 3.18-1.18.63 1.59.23 2.76.11 3.05.74.8 1.19 1.83 1.19 3.09 0 4.42-2.69 5.4-5.25 5.68.41.36.78 1.07.78 2.15 0 1.56-.01 2.81-.01 3.19 0 .31.21.68.8.56A10.52 10.52 0 0 0 23.5 12C23.5 5.73 18.27.5 12 .5Z" />
+    </svg>
+  );
+}
+
+function LinkedinIcon({ size = 15, color = "#fff", opacity = 1 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill={color} opacity={opacity}>
+      <path d="M20.45 20.45h-3.55v-5.57c0-1.33-.02-3.03-1.85-3.03-1.85 0-2.14 1.45-2.14 2.94v5.66H9.36V9h3.41v1.56h.05c.48-.9 1.64-1.85 3.38-1.85 3.61 0 4.28 2.38 4.28 5.47v6.27ZM5.34 7.43a2.06 2.06 0 1 1 0-4.12 2.06 2.06 0 0 1 0 4.12ZM7.12 20.45H3.56V9h3.56v11.45Z" />
+    </svg>
+  );
+}
+
 /* ---------------- Footer ---------------- */
 
 function Footer() {
-  const team = ["Aayush Singh", "Agraj Singh", "Ananya Arora", "Akhil Kumar Yadav", "Mohammad Aqif Khan"];
+  const [showLinks, setShowLinks] = useState(false);
+  const timerRef = useRef(null);
+
+  // Starts the 5-second countdown to close the window
+  const startTimer = () => {
+    timerRef.current = setTimeout(() => {
+      setShowLinks(false);
+    }, 3000);
+  };
+
+  // Stops the countdown
+  const clearTimer = () => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+  };
+
+  // Automatically start the timer whenever the popup opens
+  useEffect(() => {
+    if (showLinks) {
+      startTimer();
+    }
+    // Cleanup function to clear the timer if the component unmounts
+    return () => clearTimer();
+  }, [showLinks]);
+
+  const team = [
+    { name: "Aayush Singh", linkedin: "https://www.linkedin.com/in/aayush-singh-b357152b8/" },
+    { name: "Agraj Singh", linkedin: "https://www.linkedin.com/in/thattimelessman" },
+    { name: "Ananya Arora", linkedin: "https://www.linkedin.com/in/ananya-arora-a0b925327/" },
+    { name: "Akhil Kumar Yadav", linkedin: null },
+    { name: "Mohammad Aqif Khan", linkedin: null },
+  ];
+  
   return (
     <footer style={{ background: C.ink }}>
       <div className="max-w-6xl mx-auto px-6 md:px-10 py-16 grid md:grid-cols-3 gap-10">
@@ -697,30 +747,91 @@ function Footer() {
             <span className="text-sm text-white" style={{ fontFamily: FD }}>RaktJaal</span>
           </div>
           <p className="text-xs" style={{ color: "#FFFFFF73", fontFamily: FB }}>
-            PSIT Kanpur <br/> 
+            PSIT Kanpur <br/>
             Dept. of Data Science <br/>
-            Mini Project 2026–27 
+            Mini Project 2026–27
           </p>
         </div>
-        
+
         <div id="team">
           <p className="text-xs uppercase tracking-wider mb-4" style={{ color: "#FFFFFF80", fontFamily: FM }}>Team CS-DS-3A-05</p>
           <div className="flex flex-col gap-2.5 text-sm" style={{ fontFamily: FB }}>
-            {team.map((l) => (<span key={l} className="text-white opacity-70">{l}</span>))}
+            {team.map((m) => (
+              <span key={m.name} className="text-white opacity-70">
+                {m.name}
+              </span>
+            ))}
           </div>
         </div>
+        
         <div>
           <p className="text-xs uppercase tracking-wider mb-4" style={{ color: "#FFFFFF80", fontFamily: FM }}>Connect</p>
-          <div className="flex gap-3">
-            <Globe size={15} color="#fff" opacity={0.6} />
-            <Send size={15} color="#fff" opacity={0.6} />
+          <div className="flex gap-4">
+            <button className="transition-opacity hover:opacity-100 opacity-60">
+              <Globe size={16} color="#fff" />
+            </button>
+            
+            <div className="relative">
+              <button 
+                onClick={() => {
+                  if (showLinks) {
+                    setShowLinks(false);
+                    clearTimer();
+                  } else {
+                    setShowLinks(true);
+                  }
+                }}
+                className="transition-opacity hover:opacity-100 opacity-60 flex items-center focus:outline-none"
+              >
+                <Send size={16} color="#fff" />
+              </button>
+
+              {showLinks && (
+                <div 
+                  onMouseEnter={clearTimer} // Pause timer when mouse enters
+                  onMouseLeave={startTimer} // Restart timer when mouse leaves
+                  className="absolute bottom-full left-0 mb-3 w-48 rounded-xl shadow-2xl py-2 z-50 overflow-hidden"
+                  style={{ background: "#27272A", border: "1px solid #3F3F46", animation: "fadeUp 0.2s ease" }}
+                >
+                  <p className="text-[10px] uppercase tracking-wider px-3.5 mb-1.5" style={{ color: "#FFFFFF80", fontFamily: FM }}>
+                    LinkedIn Profiles
+                  </p>
+                  <div className="flex flex-col">
+                    {team.filter(m => m.linkedin).map(m => (
+                      <a
+                        key={m.name}
+                        href={m.linkedin}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-2.5 px-3.5 py-2 text-xs text-white hover:bg-white/10 transition-colors"
+                        style={{ fontFamily: FB }}
+                      >
+                        <LinkedinIcon size={13} /> {m.name}
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+            
           </div>
         </div>
       </div>
+      
       <div className="max-w-6xl mx-auto px-6 md:px-10 py-5 flex flex-wrap gap-3 justify-between items-center" style={{ borderTop: "1px solid #FFFFFF1A" }}>
         <span className="text-xs" style={{ color: "#FFFFFF66", fontFamily: FB }}>
           © 2026 RaktJaal
         </span>
+        
+        <a
+          href="https://github.com/thattimelessman/RaktJaal"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center gap-1.5 text-xs transition-opacity hover:opacity-100"
+          style={{ color: "#FFFFFF66", fontFamily: FB }}
+        >
+          <GithubIcon size={13} /> View on GitHub
+        </a>
       </div>
     </footer>
   );
