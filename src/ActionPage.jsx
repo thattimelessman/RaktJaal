@@ -217,15 +217,21 @@ function Tooltip({ label, children, side = "top" }) {
    passed in (the signed-in user's own picture), otherwise falls back
    to initials. Mirrors Profilepage.jsx's Avatar so the same photo
    shows up consistently across the app, including tap-to-expand. */
-function Avatar({ photo, initials, size = 40, tone = C.chip }) {
+function Avatar({ photo, initials, size = 40, tone = C.chip, expandable = true }) {
   const [expanded, setExpanded] = useState(false);
 
   return (
     <>
       <div
         className="rounded-full overflow-hidden flex items-center justify-center shrink-0 transition-opacity hover:opacity-85"
-        style={{ width: size, height: size, background: tone, cursor: photo ? "pointer" : "default" }}
-        onClick={() => photo && setExpanded(true)}
+        style={{ width: size, height: size, background: tone, cursor: photo && expandable ? "pointer" : "default" }}
+        onClick={(e) => {
+          if (photo && expandable) {
+            e.preventDefault();
+            e.stopPropagation(); // Stops the click from triggering parent buttons
+            setExpanded(true);
+          }
+        }}
       >
         {photo ? (
           <img src={photo} alt="Profile" className="w-full h-full object-cover" />
@@ -236,11 +242,14 @@ function Avatar({ photo, initials, size = 40, tone = C.chip }) {
         )}
       </div>
 
-      {expanded && photo && (
+      {expanded && photo && expandable && (
         <div
           className="fixed inset-0 z-[9999] flex items-center justify-center p-4 sm:p-10"
           style={{ background: "rgba(0,0,0,0.85)", backdropFilter: "blur(5px)" }}
-          onClick={() => setExpanded(false)}
+          onClick={(e) => {
+            e.stopPropagation();
+            setExpanded(false);
+          }}
         >
           <img
             src={photo}
@@ -474,6 +483,96 @@ function MapModal({ label, value, onPick, onClose }) {
         <MapPicker value={value} onPick={onPick} />
       </div>
     </div>
+  );
+}
+
+/* ---------------------------------------------------------------
+   File-type icon badges — used by the chat attachment preview so a
+   PDF/DOCX/PPTX/XLSX/ZIP etc. reads as a real document card instead
+   of a plain filename-as-link. Each kind gets a distinct icon +
+   color, matching the badge treatment used for blood types.
+------------------------------------------------------------------ */
+function fileKind(name = "", mimeType = "") {
+  const ext = (name.split(".").pop() || "").toLowerCase();
+  if (ext === "pdf" || mimeType === "application/pdf")
+    return { label: "PDF", color: "#D6303F", tint: "#FBEAEA" };
+  if (["doc", "docx"].includes(ext) || mimeType.includes("word"))
+    return { label: "DOC", color: "#1D4ED8", tint: "#DCEEFF" };
+  if (["ppt", "pptx"].includes(ext) || mimeType.includes("presentation"))
+    return { label: "PPT", color: "#C2410C", tint: "#FDE7D6" };
+  if (["xls", "xlsx", "csv"].includes(ext) || mimeType.includes("sheet") || mimeType === "text/csv")
+    return { label: "XLS", color: "#15803D", tint: "#DEF5E4" };
+  if (["zip", "rar", "7z"].includes(ext))
+    return { label: "ZIP", color: "#7C3AED", tint: "#EDE7FB" };
+  if (ext === "txt" || mimeType === "text/plain")
+    return { label: "TXT", color: "#52525B", tint: "#F4F4F5" };
+  return { label: ext ? ext.toUpperCase().slice(0, 4) : "FILE", color: "#52525B", tint: "#F4F4F5" };
+}
+
+/* A richer attachment card for non-image files in chat — colored file
+   icon, name, kind badge and size, with a download affordance, instead
+   of the plain paperclip-and-filename link this used to be. */
+function FileBubble({ file, isMine }) {
+  const meta = fileKind(file.name, file.mimeType);
+  const sizeLabel =
+    typeof file.size === "number"
+      ? file.size >= 1024 * 1024
+        ? `${(file.size / (1024 * 1024)).toFixed(1)} MB`
+        : `${Math.max(1, Math.round(file.size / 1024))} KB`
+      : null;
+
+  return (
+    <a
+      href={file.url}
+      download={file.name}
+      className="flex items-center gap-3 px-3 py-3 rounded-2xl no-underline transition-transform hover:scale-[1.01]"
+      style={{
+        background: isMine ? "#1C1C1C" : "#fff",
+        border: `1px solid ${isMine ? "rgba(255,255,255,0.12)" : C.border}`,
+        minWidth: 232,
+        maxWidth: 260,
+      }}
+    >
+      <div
+        className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0 font-extrabold"
+        style={{ background: meta.tint, color: meta.color, fontFamily: F, fontSize: 10, letterSpacing: "0.2px" }}
+      >
+        {meta.label}
+      </div>
+      <div className="min-w-0 flex-1">
+        <p
+          className="text-[13px] font-semibold truncate"
+          style={{ color: isMine ? "#fff" : C.ink, fontFamily: F }}
+          title={file.name}
+        >
+          {file.name}
+        </p>
+        <div className="flex items-center gap-1.5 mt-1">
+          <span
+            className="text-[9.5px] font-extrabold px-1.5 py-[1px] rounded"
+            style={{ background: meta.tint, color: meta.color, fontFamily: F, letterSpacing: "0.3px" }}
+          >
+            {meta.label}
+          </span>
+          {sizeLabel && (
+            <span className="text-[10.5px]" style={{ color: isMine ? "rgba(255,255,255,0.55)" : C.faint, fontFamily: F }}>
+              {sizeLabel}
+            </span>
+          )}
+        </div>
+      </div>
+      <span
+        className="w-7 h-7 rounded-full flex items-center justify-center shrink-0"
+        style={{ background: isMine ? "rgba(255,255,255,0.12)" : C.chip }}
+        aria-hidden="true"
+      >
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={isMine ? "#fff" : C.sub} strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M12 3v12" />
+          <path d="M7 11l5 5 5-5" />
+          <path d="M5 20h14" />
+        </svg>
+      </span>
+    </a>
   );
 }
 
@@ -729,31 +828,18 @@ function InboxPanel({ threads, activeThreadId, onSelectThread, onSend, onBack })
                     <div
                       className="max-w-[75%] rounded-2xl text-sm overflow-hidden"
                       style={{
-                        background: m.type === "image" ? "transparent" : m.from === "me" ? C.ink : C.chip,
+                        background: m.type === "image" || m.type === "file" ? "transparent" : m.from === "me" ? C.ink : C.chip,
                         color: m.from === "me" ? "#fff" : C.ink,
                         fontFamily: F,
-                        padding: m.type === "image" ? 0 : "8px 14px",
+                        padding: m.type === "image" || m.type === "file" ? 0 : "8px 14px",
                         borderBottomRightRadius: m.from === "me" ? 4 : 16,
                         borderBottomLeftRadius: m.from === "me" ? 16 : 4,
                       }}
                     >
                       {m.type === "image" ? (
-                      <img src={m.url} alt={m.name || "Attachment"} className="max-w-[220px] max-h-[220px] object-cover block" />
+                        <img src={m.url} alt={m.name || "Attachment"} className="max-w-[220px] max-h-[220px] object-cover block" />
                       ) : m.type === "file" ? (
-                     <a 
-                      href={m.url}
-                      download={m.name}
-                      className="flex items-center gap-2 no-underline"
-                      style={{ color: "inherit" }}
-                      >
-                          <Paperclip size={13} className="shrink-0" />
-                          <span className="truncate">{m.name}</span>
-                          {typeof m.size === "number" && (
-                            <span className="text-[10px] opacity-70 shrink-0">
-                              {(m.size / (1024 * 1024)).toFixed(1)} MB
-                            </span>
-                          )}
-                        </a>
+                        <FileBubble file={m} isMine={m.from === "me"} />
                       ) : (
                         m.text
                       )}
@@ -1121,11 +1207,19 @@ function DonateBloodFlow({ incoming, onApprove, onDecline, onOpenThread }) {
   const pendingCount = incoming.filter((r) => !r.status).length;
   const urgentCount = incoming.filter((r) => !r.status && r.urgent).length;
 
+  // Sort requests: Urgent first, then by closest distance
+  const sortedIncoming = [...incoming].sort((a, b) => {
+    if (a.urgent === b.urgent) {
+      return a.distanceKm - b.distanceKm;
+    }
+    return a.urgent ? -1 : 1;
+  });
+
   return (
     <div className="flex-1 flex flex-col min-h-0">
       <div className="px-6 py-5 sm:px-8" style={{ borderBottom: `1px solid ${C.border}` }}>
         <h2 className="text-lg font-bold tracking-tight" style={{ color: C.ink, fontFamily: F }}>Requests near you</h2>
-        <p className="text-xs mt-0.5" style={{ color: C.sub, fontFamily: F }}>People who need your blood type, closest first.</p>
+        <p className="text-xs mt-0.5" style={{ color: C.sub, fontFamily: F }}>People who need your blood type, urgent and closest first.</p>
 
         {incoming.length > 0 && (
           <div className="flex items-center gap-2 mt-3.5">
@@ -1142,10 +1236,10 @@ function DonateBloodFlow({ incoming, onApprove, onDecline, onOpenThread }) {
       </div>
 
       <div className="flex-1 overflow-y-auto rk-scroll px-6 py-4 sm:px-8 flex flex-col gap-3">
-        {incoming.length === 0 ? (
+        {sortedIncoming.length === 0 ? (
           <p className="text-sm text-center py-10" style={{ color: C.sub, fontFamily: F }}>No pending requests right now — you'll be notified when one comes in.</p>
         ) : (
-          incoming.map((r) => {
+          sortedIncoming.map((r) => {
             const initials = r.name.split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase();
             return (
               <div
@@ -1492,6 +1586,7 @@ export default function ActionPage() {
       {/* ---- Main column ---- */}
       <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden">
         {/* top chrome: mobile brand + nav on the left, corner icons on the right */}
+        {/* top chrome: mobile brand + nav on the left, corner icons on the right */}
         <div className="flex items-center justify-between gap-3 px-5 sm:px-8 py-3.5 shrink-0" style={{ borderBottom: `1px solid ${C.border}` }}>
           <button onClick={() => navigate("/")} className="sm:hidden flex items-center gap-2">
             <BrandMark size={26} />
@@ -1503,7 +1598,7 @@ export default function ActionPage() {
           <div className="flex items-center gap-1.5">
             <NotificationBell notifications={notifications} onMarkAllRead={markAllRead} />
             <button onClick={() => navigate("/profile")} aria-label="Your profile" className="ml-1">
-              <Avatar photo={user.profilePhoto} initials={initials} size={32} tone={C.chip} />
+              <Avatar photo={user.profilePhoto} initials={initials} size={32} tone={C.chip} expandable={false} />
             </button>
           </div>
         </div>
