@@ -633,7 +633,7 @@ function InboxPanel({ threads, activeThreadId, onSelectThread, onSend, onBack })
 
   const send = () => {
     if (!draft.trim() || !active) return;
-    onSend(active.id, draft.trim());
+    onSend(active.id, { type: "text", text: draft.trim() });
     setDraft("");
   };
 
@@ -644,7 +644,13 @@ function InboxPanel({ threads, activeThreadId, onSelectThread, onSend, onBack })
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file || !active) return;
-    onSend(active.id, `${kind === "camera" ? "📷" : "📎"} ${file.name}`);
+    if (kind === "file" && !file.type.startsWith("image/")) {
+      onSend(active.id, { type: "file", name: file.name });
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => onSend(active.id, { type: "image", url: reader.result, name: file.name });
+    reader.readAsDataURL(file);
   };
 
   return (
@@ -676,7 +682,7 @@ function InboxPanel({ threads, activeThreadId, onSelectThread, onSend, onBack })
                       {t.unread && <span className="w-2 h-2 rounded-full shrink-0" style={{ background: C.brick }} />}
                     </div>
                     <p className="text-xs truncate mt-0.5" style={{ color: C.sub, fontFamily: F }}>
-                      {lastMsg ? lastMsg.text : "Say hello"}
+                      {!lastMsg ? "Say hello" : lastMsg.type === "image" ? "📷 Photo" : lastMsg.type === "file" ? `📎 ${lastMsg.name}` : lastMsg.text}
                     </p>
                   </div>
                 </button>
@@ -708,36 +714,47 @@ function InboxPanel({ threads, activeThreadId, onSelectThread, onSend, onBack })
                 active.messages.map((m, i) => (
                   <div key={i} className={`flex ${m.from === "me" ? "justify-end" : "justify-start"}`}>
                     <div
-                      className="max-w-[75%] px-3.5 py-2 rounded-2xl text-sm"
+                      className="max-w-[75%] rounded-2xl text-sm overflow-hidden"
                       style={{
-                        background: m.from === "me" ? C.ink : C.chip,
+                        background: m.type === "image" ? "transparent" : m.from === "me" ? C.ink : C.chip,
                         color: m.from === "me" ? "#fff" : C.ink,
                         fontFamily: F,
+                        padding: m.type === "image" ? 0 : "8px 14px",
                         borderBottomRightRadius: m.from === "me" ? 4 : 16,
                         borderBottomLeftRadius: m.from === "me" ? 16 : 4,
                       }}
                     >
-                      {m.text}
+                      {m.type === "image" ? (
+                        <img src={m.url} alt={m.name || "Attachment"} className="max-w-[220px] max-h-[220px] object-cover block" />
+                      ) : m.type === "file" ? (
+                        <span className="flex items-center gap-1.5">
+                          <Paperclip size={13} /> {m.name}
+                        </span>
+                      ) : (
+                        m.text
+                      )}
                     </div>
                   </div>
                 ))
               )}
             </div>
-            <div className="flex items-center gap-1.5 px-4 py-3.5" style={{ borderTop: `1px solid ${C.border}` }}>
+            <div className="flex items-end gap-1.5 px-4 py-3.5" style={{ borderTop: `1px solid ${C.border}` }}>
               <input ref={fileInputRef} type="file" hidden onChange={(e) => handleAttachment(e, "file")} />
               <button
                 onClick={() => setShowCamera(true)}
                 aria-label="Take a photo"
-                className="w-9 h-9 rounded-full flex items-center justify-center shrink-0 transition-colors hover:bg-[#F4F4F5]"
+                className="w-9 h-9 rounded-full flex items-center justify-center shrink-0 transition-colors"
+                style={{ background: C.chip }}
               >
-                <Camera size={16} color={C.sub} />
+                <Camera size={16} color={C.ink} strokeWidth={2} />
               </button>
               <button
                 onClick={() => fileInputRef.current?.click()}
                 aria-label="Attach a file"
-                className="w-9 h-9 rounded-full flex items-center justify-center shrink-0 transition-colors hover:bg-[#F4F4F5]"
+                className="w-9 h-9 rounded-full flex items-center justify-center shrink-0 transition-colors"
+                style={{ background: C.chip }}
               >
-                <Paperclip size={16} color={C.sub} />
+                <Paperclip size={16} color={C.ink} strokeWidth={2} />
               </button>
               <input
                 value={draft}
@@ -754,7 +771,7 @@ function InboxPanel({ threads, activeThreadId, onSelectThread, onSend, onBack })
                 className="w-9 h-9 rounded-full flex items-center justify-center shrink-0 transition-opacity"
                 style={{ background: C.ink, opacity: draft.trim() ? 1 : 0.35 }}
               >
-                <Send size={14} color="#fff" style={{ transform: "translate(1px, -1px)" }} />
+                <Send size={14} color="#fff" style={{ marginLeft: 1 }} />
               </button>
             </div>
           </>
@@ -767,7 +784,7 @@ function InboxPanel({ threads, activeThreadId, onSelectThread, onSend, onBack })
 
       {showCamera && (
         <CameraModal
-          onCapture={(dataUrl) => { onSend(active.id, dataUrl); setShowCamera(false); }}
+          onCapture={(dataUrl) => { onSend(active.id, { type: "image", url: dataUrl, name: "Photo" }); setShowCamera(false); }}
           onClose={() => setShowCamera(false)}
         />
       )}
@@ -1366,9 +1383,9 @@ export default function ActionPage() {
     setIncomingRequests((prev) => prev.map((r) => (r.id === requestId ? { ...r, status: "declined" } : r)));
   };
 
-  const handleSendMessage = (threadId, text) => {
+  const handleSendMessage = (threadId, payload) => {
     setThreads((prev) =>
-      prev.map((t) => (t.id === threadId ? { ...t, messages: [...t.messages, { from: "me", text }] } : t))
+      prev.map((t) => (t.id === threadId ? { ...t, messages: [...t.messages, { from: "me", ...payload }] } : t))
     );
   };
 
