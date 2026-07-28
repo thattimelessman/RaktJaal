@@ -640,16 +640,29 @@ function InboxPanel({ threads, activeThreadId, onSelectThread, onSend, onBack })
   // Local-only attachment stub: no upload happens (no backend yet), this
   // just drops a placeholder line into the thread so the affordance is
   // visible and wireable later — mirrors this file's "UI only" pattern.
+  const MAX_FILE_BYTES = 50 * 1024 * 1024; // 50MB
+
   const handleAttachment = (e, kind) => {
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file || !active) return;
-    if (kind === "file" && !file.type.startsWith("image/")) {
-      onSend(active.id, { type: "file", name: file.name });
+
+    if (file.size > MAX_FILE_BYTES) {
+      onSend(active.id, { type: "text", text: `⚠️ "${file.name}" is over 50MB and can't be sent here.` });
       return;
     }
+
+    const isImage = file.type.startsWith("image/");
     const reader = new FileReader();
-    reader.onload = () => onSend(active.id, { type: "image", url: reader.result, name: file.name });
+    reader.onload = () =>
+      onSend(active.id, {
+        type: isImage ? "image" : "file",
+        url: reader.result,
+        name: file.name,
+        size: file.size,
+        mimeType: file.type,
+      });
+    reader.onerror = () => onSend(active.id, { type: "text", text: `⚠️ Couldn't attach "${file.name}".` });
     reader.readAsDataURL(file);
   };
 
@@ -725,11 +738,22 @@ function InboxPanel({ threads, activeThreadId, onSelectThread, onSend, onBack })
                       }}
                     >
                       {m.type === "image" ? (
-                        <img src={m.url} alt={m.name || "Attachment"} className="max-w-[220px] max-h-[220px] object-cover block" />
+                      <img src={m.url} alt={m.name || "Attachment"} className="max-w-[220px] max-h-[220px] object-cover block" />
                       ) : m.type === "file" ? (
-                        <span className="flex items-center gap-1.5">
-                          <Paperclip size={13} /> {m.name}
-                        </span>
+                     <a 
+                      href={m.url}
+                      download={m.name}
+                      className="flex items-center gap-2 no-underline"
+                      style={{ color: "inherit" }}
+                      >
+                          <Paperclip size={13} className="shrink-0" />
+                          <span className="truncate">{m.name}</span>
+                          {typeof m.size === "number" && (
+                            <span className="text-[10px] opacity-70 shrink-0">
+                              {(m.size / (1024 * 1024)).toFixed(1)} MB
+                            </span>
+                          )}
+                        </a>
                       ) : (
                         m.text
                       )}
@@ -739,7 +763,13 @@ function InboxPanel({ threads, activeThreadId, onSelectThread, onSend, onBack })
               )}
             </div>
             <div className="flex items-end gap-1.5 px-4 py-3.5" style={{ borderTop: `1px solid ${C.border}` }}>
-              <input ref={fileInputRef} type="file" hidden onChange={(e) => handleAttachment(e, "file")} />
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".pdf,.ppt,.pptx,.doc,.docx,.xls,.xlsx,image/*,.zip,.txt,.csv"
+                hidden
+                onChange={(e) => handleAttachment(e, "file")}
+              />
               <button
                 onClick={() => setShowCamera(true)}
                 aria-label="Take a photo"
