@@ -697,7 +697,9 @@ function Footer() {
             <span className="text-sm text-white" style={{ fontFamily: FD }}>RaktJaal</span>
           </div>
           <p className="text-xs" style={{ color: "#FFFFFF73", fontFamily: FB }}>
-            PSIT Kanpur · Dept. of Data Science · Mini Project 2026–27
+            PSIT Kanpur <br/> 
+            Dept. of Data Science <br/>
+            Mini Project 2026–27 
           </p>
         </div>
         

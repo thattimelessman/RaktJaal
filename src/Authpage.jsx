@@ -208,7 +208,7 @@ function BrandPanel() {
               <span className="w-2 h-2 rounded-full" style={{ background: "#5FD07A" }} />
               <span className="text-xs uppercase tracking-wider text-white" style={{ fontFamily: FM }}>Match found</span>
             </div>
-            <span className="text-xs" style={{ color: C.blush, fontFamily: FM }}>1.2km away</span>
+            <span className="text-xs" style={{ color: C.blush, fontFamily: FM }}>Nearby You</span>
           </div>
           <VitalsLine />
           <div className="flex items-center gap-2 mt-2">
