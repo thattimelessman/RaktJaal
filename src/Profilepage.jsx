@@ -1827,7 +1827,7 @@ export default function ProfilePage() {
   ];
 
   return (
-    <DialogShell onClose={() => navigate("/")}>
+    <DialogShell onClose={() => navigate(-1)}>
       {/* saved toast */}
       <div
         className="fixed top-5 right-5 z-50 transition-all duration-300"
