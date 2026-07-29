@@ -623,18 +623,23 @@ function NotificationBell({ notifications, onMarkAllRead }) {
     return () => clearTimeout(t);
   }, [ringing]);
 
+  // Auto-close after 3 seconds of inactivity
   useEffect(() => {
-    if (!toast) return;
-    const t = setTimeout(() => setToast(null), 2500);
-    return () => clearTimeout(t);
-  }, [toast]);
+    if (open && !hover) {
+      const t = setTimeout(() => setOpen(false), 3000);
+      return () => clearTimeout(t);
+    }
+  }, [open, hover]);
 
   return (
-    <div className="relative" ref={ref}>
+    <div 
+      className="relative" 
+      ref={ref}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+    >
       <button
         onClick={() => { setOpen((o) => !o); setToast(null); }}
-        onMouseEnter={() => setHover(true)}
-        onMouseLeave={() => setHover(false)}
         aria-label="Notifications"
         className="relative w-9 h-9 rounded-full flex items-center justify-center transition-colors duration-150"
         style={{ background: open || hover ? C.chip : "transparent" }}
@@ -667,12 +672,20 @@ function NotificationBell({ notifications, onMarkAllRead }) {
         </div>
       )}
 
-      {open && (
-        <div
-          className="absolute right-0 top-12 z-30 w-[340px] max-h-[440px] overflow-y-auto rk-scroll rounded-2xl bg-white"
-          style={{ border: `1px solid ${C.border}`, boxShadow: "0 24px 60px -18px rgba(0,0,0,0.25)", animation: "fadeUp 0.15s ease" }}
-        >
-          <div className="flex items-center justify-between px-4 py-3.5 sticky top-0 bg-white" style={{ borderBottom: `1px solid ${C.border}` }}>
+      <div
+        className="absolute right-0 top-12 z-30 w-[340px] max-h-[440px] overflow-y-auto rk-scroll rounded-2xl bg-white"
+        style={{
+          border: `1px solid ${C.border}`,
+          boxShadow: "0 24px 60px -18px rgba(0,0,0,0.25)",
+          transition: "all 0.4s cubic-bezier(0.16, 1, 0.3, 1)",
+          transformOrigin: "top right",
+          opacity: open ? 1 : 0,
+          transform: open ? "translateY(0) scale(1)" : "translateY(-8px) scale(0.96)",
+          pointerEvents: open ? "auto" : "none",
+          visibility: open ? "visible" : "hidden"
+        }}
+      >
+        <div className="flex items-center justify-between px-4 py-3.5 sticky top-0 bg-white" style={{ borderBottom: `1px solid ${C.border}` }}>
             <span className="text-[14.5px] font-bold tracking-tight" style={{ color: C.ink, fontFamily: F }}>Notifications</span>
             {unread > 0 && (
               <button onClick={onMarkAllRead} className="text-[11.5px] px-2.5 py-1 rounded-full transition-colors hover:bg-[#F4F4F5]" style={{ color: C.brick, fontFamily: F, fontWeight: 700 }}>
@@ -710,7 +723,7 @@ function NotificationBell({ notifications, onMarkAllRead }) {
             </div>
           )}
         </div>
-      )}
+      
     </div>
   );
 }
