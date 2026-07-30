@@ -304,25 +304,65 @@ function validatePincode(v) {
   return { valid: true, reason: "", normalized: trimmed };
 }
 
-/* Looks up state + real locality/post-office names for a 6-digit PIN via
-   India Post's free, no-auth public API (api.postalpincode.in) — a plain
-   client-side GET, no backend or API key involved. Returns null on any
-   failure (bad PIN, offline, API down) so the caller falls back to manual
-   state/city selection instead of silently corrupting the form. */
+/* Looks up state + real locality/post-office names for a 6-digit PIN.
+   Attempts the official Indian Post API first for maximum precision, but 
+   cuts it off after 3 seconds to prevent freezing. Falls back to OpenStreetMap
+   for lightning-fast, high-precision results if Indian Post is offline. */
 async function lookupPincode(pincode) {
   try {
-    const res = await fetch(`https://api.postalpincode.in/pincode/${pincode}`);
-    if (!res.ok) return null;
-    const data = await res.json();
-    const result = Array.isArray(data) ? data[0] : null;
-    if (!result || result.Status !== "Success" || !Array.isArray(result.PostOffice) || result.PostOffice.length === 0) {
-      return null;
+    // ATTEMPT 1: Official Indian Post API (Highest precision, but unstable)
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3000);
+    
+    try {
+      const postRes = await fetch(`https://api.postalpincode.in/pincode/${pincode}`, { signal: controller.signal });
+      clearTimeout(timeoutId);
+      
+      if (postRes.ok) {
+        const postData = await postRes.json();
+        const result = Array.isArray(postData) ? postData[0] : null;
+        if (result && result.Status === "Success" && Array.isArray(result.PostOffice) && result.PostOffice.length > 0) {
+          const state = result.PostOffice[0].State;
+          const localities = [...new Set(result.PostOffice.map((po) => po.Name).filter(Boolean))];
+          return { state, localities };
+        }
+      }
+    } catch (err) {
+      clearTimeout(timeoutId);
     }
-    const state = result.PostOffice[0].State;
-    // Post offices sharing a PIN usually span a few neighbouring localities —
-    // surface each distinct one as a selectable option rather than guessing one.
-    const localities = [...new Set(result.PostOffice.map((po) => po.Name).filter(Boolean))];
-    return { state, localities };
+
+    // ATTEMPT 2: OpenStreetMap (Nominatim) API (Fast, reliable fallback)
+    const nomRes = await fetch(`https://nominatim.openstreetmap.org/search?postalcode=${pincode}&country=india&format=json&addressdetails=1`);
+    if (!nomRes.ok) return null;
+    
+    const nomData = await nomRes.json();
+    if (!nomData || nomData.length === 0) return null;
+
+    let state = "";
+    const localities = new Set();
+
+    nomData.forEach((place) => {
+      const addr = place.address;
+      if (!addr) return;
+      
+      if (addr.state && !state) {
+        state = addr.state;
+        if (state.includes("Delhi")) state = "Delhi";
+      }
+      
+      const locality = addr.suburb || addr.neighbourhood || addr.village || addr.town || addr.city || addr.state_district;
+      if (locality) localities.add(locality);
+    });
+
+    const matchedState = INDIAN_STATES.find(s => 
+      state.toLowerCase().includes(s.toLowerCase()) || s.toLowerCase().includes(state.toLowerCase())
+    ) || state;
+
+    const localityArray = [...localities];
+    if (!matchedState || localityArray.length === 0) return null;
+
+    return { state: matchedState, localities: localityArray };
+    
   } catch {
     return null;
   }
