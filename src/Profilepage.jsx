@@ -1245,17 +1245,14 @@ function PhoneOtpVerify({ phone, onVerified, onCancel }) {
    Donation history
 ------------------------------------------------------------------ */
 /**
- * Blood type is safety-critical, so unlike other profile fields it isn't
- * casually re-editable after the first save. Once set, it shows locked
- * with an explicit "Request change" path that requires a second confirm
- * click — a deliberate speed bump against fat-fingering a life-or-death
- * field, not a technical lock (there's no backend to enforce one).
+ * Blood type is safety-critical. Once set, it shows strictly locked.
+ * There is no in-app change flow — if a user makes a mistake, they 
+ * must email support with medical proof to get it changed.
  */
 function BloodTypePicker({ value, onSave }) {
-  const [pendingChange, setPendingChange] = useState(false);
   const [draft, setDraft] = useState(value || "");
 
-  if (value && !pendingChange) {
+  if (value) {
     return (
       <div>
         <div className="flex items-center gap-2 mb-2.5">
@@ -1269,19 +1266,16 @@ function BloodTypePicker({ value, onSave }) {
           >
             <Lock size={11} /> {value}
           </span>
-          <button
-            onClick={() => {
-              setDraft(value);
-              setPendingChange(true);
-            }}
-            className="text-xs transition-opacity hover:opacity-60"
+          <a
+            href="mailto:support@raktjaal.com?subject=Blood%20Group%20Change%20Request"
+            className="text-xs transition-opacity hover:opacity-60 underline"
             style={{ color: C.sub, fontFamily: F, fontWeight: 600 }}
           >
-            Request change
-          </button>
+            Contact us to change
+          </a>
         </div>
         <p className="text-[11px] mt-2 max-w-sm" style={{ color: C.faint, fontFamily: F }}>
-          Locked after first save since it's safety-critical for matching. You can still change it if it was entered wrong — that just needs a second confirmation.
+          Locked permanently after saving since it's safety-critical for matching. If you entered this incorrectly, please mail us with medical proof to get it updated.
         </p>
       </div>
     );
@@ -1319,31 +1313,18 @@ function BloodTypePicker({ value, onSave }) {
       </div>
       {draft && (
         <div className="flex items-center gap-2 mt-3">
-          {pendingChange && (
-            <button
-              onClick={() => setPendingChange(false)}
-              className="text-xs px-3.5 py-2 rounded-full transition-colors hover:bg-[#F4F4F5]"
-              style={{ border: `1px solid ${C.border}`, color: C.ink, fontFamily: F, fontWeight: 600 }}
-            >
-              Cancel
-            </button>
-          )}
           <button
-            onClick={() => {
-              onSave(draft);
-              setPendingChange(false);
-            }}
+            onClick={() => onSave(draft)}
             className="text-xs px-3.5 py-2 rounded-full text-white transition-opacity hover:opacity-85"
             style={{ background: C.ink, fontFamily: F, fontWeight: 600 }}
           >
-            {value ? `Confirm change to ${draft}` : `Save ${draft}   can't be changed casually later`}
+            Save {draft} — cannot be changed later
           </button>
         </div>
       )}
     </div>
   );
 }
-
 function DonationHistory({ donations }) {
   if (!donations || donations.length === 0) {
     return (
