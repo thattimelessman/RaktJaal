@@ -1,8 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
-  Paperclip,
-  ArrowUp,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -14,7 +12,6 @@ import {
   TestTube2,
   Syringe,
   ShieldCheck,
-  Globe,
   Send,
   Sparkles,
 } from "lucide-react";
@@ -206,14 +203,6 @@ function FloatingChip({ icon: Icon, style, delay = "0s" }) {
 }
 
 function Hero() {
-  const [city, setCity] = useState("");
-  const [msg, setMsg] = useState(null);
-
-  const handleSubmit = () => {
-    if (!city.trim()) return;
-    setMsg(`No live coverage in "${city}" yet — we'll notify you the moment we launch there.`);
-  };
-
   return (
     <section id="top" className="max-w-6xl mx-auto px-6 md:px-10 pt-14 md:pt-20 pb-24 grid md:grid-cols-2 gap-16 items-center">
       <Reveal>
@@ -233,48 +222,9 @@ function Hero() {
           real-time alerts — matched by blood type, distance, and urgency.
         </p>
 
-        <div
-          id="finder"
-          className="mt-8 rounded-2xl p-2.5 flex flex-col gap-1"
-          style={{ border: `1.5px solid ${C.ink}22`, background: "#fff", boxShadow: "0 20px 40px -24px rgba(20,17,15,0.25)" }}
-        >
-          <input
-            value={city}
-            onChange={(e) => setCity(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
-            placeholder="Enter your city to check coverage..."
-            className="w-full px-3.5 pt-2.5 text-base outline-none bg-transparent"
-            style={{ color: C.ink, fontFamily: FB }}
-          />
-          <div className="flex items-center justify-between px-2.5 pb-1.5">
-            <div className="flex items-center gap-3" style={{ color: C.sub }}>
-              <Paperclip size={16} />
-              <MapPin size={16} />
-            </div>
-            <button
-              onClick={handleSubmit}
-              aria-label="Check coverage"
-              className="w-9 h-9 rounded-full flex items-center justify-center transition-transform hover:scale-105 active:scale-95"
-              style={{ background: C.ink }}
-            >
-              <ArrowUp size={17} color="#fff" />
-            </button>
-          </div>
-        </div>
-        {msg && (
-          <p className="mt-3 text-sm" style={{ color: C.sub, fontFamily: FB, animation: "fadeUp 0.4s ease" }}>
-            {msg}
-          </p>
-        )}
+        
 
-        <div className="mt-9 flex items-center gap-8">
-          {[["<5s", "target alert time"], ["10km", "match radius"], ["60%", "requests seen too late today"]].map(([n, l]) => (
-            <div key={l}>
-              <div className="text-xl font-semibold" style={{ color: C.ink, fontFamily: FM }}>{n}</div>
-              <div className="text-xs mt-0.5 max-w-[7rem]" style={{ color: C.sub, fontFamily: FB }}>{l}</div>
-            </div>
-          ))}
-        </div>
+        
       </Reveal>
 
       <Reveal delay={0.15}>
@@ -875,10 +825,6 @@ function Footer() {
         <div>
           <p className="text-xs uppercase tracking-wider mb-4" style={{ color: "#FFFFFF80", fontFamily: FM }}>Connect</p>
           <div className="flex gap-4">
-            <button className="transition-opacity hover:opacity-100 opacity-60">
-              <Globe size={16} color="#fff" />
-            </button>
-            
             <div className="relative">
               <button 
                 onClick={() => {
