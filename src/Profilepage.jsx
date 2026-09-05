@@ -38,6 +38,8 @@ const FONT_IMPORT = `
 @keyframes drift1 { 0%,100% { transform: translate(0,0) scale(1); } 50% { transform: translate(40px,-30px) scale(1.08); } }
 @keyframes drift2 { 0%,100% { transform: translate(0,0) scale(1); } 50% { transform: translate(-50px,20px) scale(1.05); } }
 @keyframes drift3 { 0%,100% { transform: translate(0,0) scale(1); } 50% { transform: translate(20px,40px) scale(1.1); } }
+@keyframes tabFadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+.tab-fade { animation: tabFadeIn 0.25s ease-out; }
 .rk-scroll { scrollbar-width: thin; scrollbar-color: #D4D4D8 transparent; }
 .rk-scroll::-webkit-scrollbar { width: 7px; }
 .rk-scroll::-webkit-scrollbar-track { background: transparent; }
@@ -521,22 +523,18 @@ function Tooltip({ label, sub, children }) {
         }}
       >
         <span
-          className="block whitespace-nowrap rounded-lg px-3 py-2 text-left"
-          style={{ background: C.ink, boxShadow: "0 8px 20px -6px rgba(0,0,0,0.35)" }}
+          className="block whitespace-nowrap rounded-xl px-3.5 py-2 text-left"
+          style={{ background: "#fff", border: `1px solid ${C.border}`, boxShadow: "0 8px 20px -6px rgba(0,0,0,0.18)" }}
         >
-          <span className="block text-[11.5px] font-semibold" style={{ color: "#fff", fontFamily: F }}>
+          <span className="block text-[11.5px] font-semibold" style={{ color: C.ink, fontFamily: F }}>
             {label}
           </span>
           {sub && (
-            <span className="block text-[10.5px] mt-0.5" style={{ color: "#D4D4D8", fontFamily: F }}>
+            <span className="block text-[10.5px] mt-0.5" style={{ color: C.sub, fontFamily: F }}>
               {sub}
             </span>
           )}
         </span>
-        <span
-          className="absolute left-1/2 -translate-x-1/2 top-full -mt-[1px] w-2 h-2 rotate-45"
-          style={{ background: C.ink }}
-        />
       </span>
     </span>
   );
@@ -1724,7 +1722,14 @@ function DialogShell({ onClose, children }) {
       <AmbientBackground />
       <div
         className="relative w-full max-w-[900px] overflow-hidden flex flex-col sm:flex-row"
-        style={{ background: C.paper, borderRadius: 22, boxShadow: "0 30px 80px -20px rgba(0,0,0,0.6)", minHeight: 560, zIndex: 1 }}
+        style={{
+          background: C.paper,
+          borderRadius: 22,
+          boxShadow: "0 30px 80px -20px rgba(0,0,0,0.6)",
+          height: 640,        // fixed instead of minHeight
+          maxHeight: "90vh",  // still respects small viewports
+          zIndex: 1,
+        }}
       >
         {children}
         <button
@@ -1941,17 +1946,19 @@ export default function ProfilePage() {
               {user.email}
             </div>
           </div>
-          <button onClick={handleLogout} aria-label="Log out" className="w-7 h-7 rounded-full flex items-center justify-center shrink-0 transition-colors hover:bg-[#EFEFEF]">
-            <LogOut size={13} color={C.sub} />
-          </button>
+          <Tooltip label="Sign out">
+            <button onClick={handleLogout} aria-label="Log out" className="w-7 h-7 rounded-full flex items-center justify-center shrink-0 transition-colors hover:bg-[#EFEFEF]">
+              <LogOut size={13} color={C.sub} />
+            </button>
+          </Tooltip>
         </div>
       </aside>
 
       {/* ---- right: content panel ---- */}
       <section
-        className="flex-1 min-w-0 px-8 py-8 sm:px-10 sm:py-9 overflow-y-auto overflow-x-hidden rk-scroll rounded-b-[22px] sm:rounded-bl-none sm:rounded-tr-[22px] sm:rounded-br-[22px]"
-        style={{ maxHeight: "90vh" }}
+      className="flex-1 min-w-0 px-8 py-8 sm:px-10 sm:py-9 overflow-y-auto overflow-x-hidden rk-scroll rounded-b-[22px] sm:rounded-bl-none sm:rounded-tr-[22px] sm:rounded-br-[22px]"
       >
+        <div key={tab} className="tab-fade">
         {tab === "profile" ? (
           <>
             <h2 className="text-[20px] font-bold tracking-tight" style={{ color: C.ink, fontFamily: F }}>
@@ -2377,6 +2384,7 @@ export default function ProfilePage() {
             </div>
           </>
         )}
+        </div>
       </section>
     </DialogShell>
   );

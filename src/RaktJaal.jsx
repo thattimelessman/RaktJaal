@@ -615,18 +615,8 @@ function FAQ() {
 
 function GetStartedButton() {
   const navigate = useNavigate();
-  // Renamed to 'isActive' to encompass both mouse hover and keyboard focus
-  const [isActive, setIsActive] = useState(false);
   const [isNavigating, setIsNavigating] = useState(false);
   const timeoutRef = useRef(null);
-
-  const drops = [
-    { left: "18%", delay: "0s", size: 6 },
-    { left: "35%", delay: "0.15s", size: 5 },
-    { left: "52%", delay: "0.3s", size: 7 },
-    { left: "68%", delay: "0.1s", size: 5 },
-    { left: "83%", delay: "0.25s", size: 6 },
-  ];
 
   // Cleanup timeout to prevent memory leaks if component unmounts early
   useEffect(() => {
@@ -640,9 +630,8 @@ function GetStartedButton() {
     if (isNavigating) return;
     
     setIsNavigating(true);
-    setIsActive(false); // Cleanly stop the droplet animation
     
-    // Add slight buffer (20ms) over the 500ms animation
+    // Add slight buffer over the animation
     timeoutRef.current = setTimeout(() => {
       navigate("/register");
     }, 520);
@@ -651,76 +640,74 @@ function GetStartedButton() {
   return (
     <button
       onClick={handleClick}
-      onMouseEnter={() => setIsActive(true)}
-      onMouseLeave={() => setIsActive(false)}
-      onFocus={() => setIsActive(true)}
-      onBlur={() => setIsActive(false)}
       disabled={isNavigating}
       className={`
-        relative overflow-hidden px-7 py-3 rounded-full text-sm text-white 
-        transition-transform duration-200
-        focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-white/50
-        ${!isNavigating ? 'hover:scale-[1.04] active:scale-95 cursor-pointer' : 'cursor-default'}
+        group relative flex items-center justify-center gap-2.5 overflow-hidden rounded-full px-7 py-3 text-sm text-white 
+        transition-all duration-300 ease-out
+        focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#D6303F]
+        ${!isNavigating 
+          ? 'bg-[#D6303F] hover:bg-[#14110F] active:scale-95 cursor-pointer' 
+          : 'bg-[#14110F] cursor-default scale-[0.98]'
+        }
       `}
       style={{ 
-        background: C.brick, 
         fontFamily: FB, 
         fontWeight: 600 
       }}
       aria-live="polite"
     >
-      {/* multiple subtle droplets falling in on hover/focus, staggered */}
-      {isActive && !isNavigating && drops.map((d, i) => (
-        <span
-          key={i}
-          className="absolute top-0 rounded-full pointer-events-none"
-          style={{
-            left: d.left,
-            width: d.size,
-            height: d.size * 1.3,
-            background: "#fff",
-            opacity: 0.5,
-            animation: `dropFall 1s ease-in ${d.delay} infinite`,
-          }}
-          aria-hidden="true"
-        />
-      ))}
+      {/* Expanding Dot */}
+      <span
+        className={`
+          relative flex items-center justify-center rounded-full bg-white transition-all duration-300 ease-out
+          ${isNavigating 
+            ? 'h-6 w-6 ml-0' 
+            : 'h-2 w-2 group-hover:h-6 group-hover:w-6 group-hover:-ml-1'
+          }
+        `}
+      >
+        {/* Inline Arrow SVG - hidden initially, slides in and fades in on hover/click */}
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className={`
+            absolute text-[#14110F] transition-all duration-300 ease-out
+            ${isNavigating 
+              ? 'h-3.5 w-3.5 opacity-100 translate-x-0' 
+              : 'h-3.5 w-3.5 -translate-x-3 opacity-0 group-hover:translate-x-0 group-hover:opacity-100'
+            }
+          `}
+        >
+          <line x1="5" y1="12" x2="19" y2="12"></line>
+          <polyline points="12 5 19 12 12 19"></polyline>
+        </svg>
+      </span>
 
-      {/* click: a red wash rises to fill/confirm before navigating */}
+      {/* Button Text */}
+      <span className="relative z-10 flex items-center justify-center min-w-[110px]">
+        {isNavigating ? "Taking you there…" : "Get Started"}
+      </span>
+
+      {/* Click Ripple Effect */}
       {isNavigating && (
         <span
-          className="absolute inset-0 pointer-events-none"
-          style={{ 
-            background: C.brickDark, 
-            animation: "fillWash 0.5s cubic-bezier(.22,.61,.36,1) forwards" 
-          }}
-          aria-hidden="true"
-        />
-      )}
-
-      {/* click: ripple ring from the center */}
-      {isNavigating && (
-        <span
-          // Added translate rules to truly center the ripple origin
           className="absolute left-1/2 top-1/2 rounded-full pointer-events-none -translate-x-1/2 -translate-y-1/2"
           style={{ 
-            background: "#fff", 
-            width: "16px",
-            height: "16px",
+            background: "rgba(255, 255, 255, 0.25)", 
+            width: "40px",
+            height: "40px",
             animation: "dropRipple 0.5s ease-out forwards" 
           }}
           aria-hidden="true"
         />
       )}
-
-      {/* Added min-width to prevent button jumping when text length changes, and z-10 to stay above wash */}
-      <span className="relative z-10 flex items-center justify-center min-w-[110px]">
-        {isNavigating ? "Taking you there…" : "Get Started"}
-      </span>
     </button>
   );
 }
-
 /* ---------------- CTA ---------------- */
 
 function CTA() {
