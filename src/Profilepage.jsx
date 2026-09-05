@@ -35,9 +35,6 @@ import {
 ------------------------------------------------------------------ */
 const FONT_IMPORT = `
 @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap');
-@keyframes drift1 { 0%,100% { transform: translate(0,0) scale(1); } 50% { transform: translate(40px,-30px) scale(1.08); } }
-@keyframes drift2 { 0%,100% { transform: translate(0,0) scale(1); } 50% { transform: translate(-50px,20px) scale(1.05); } }
-@keyframes drift3 { 0%,100% { transform: translate(0,0) scale(1); } 50% { transform: translate(20px,40px) scale(1.1); } }
 @keyframes tabFadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 .tab-fade { animation: tabFadeIn 0.25s ease-out; }
 .rk-scroll { scrollbar-width: thin; scrollbar-color: #D4D4D8 transparent; }
@@ -1366,11 +1363,6 @@ function nextEligibleText(donations) {
   return `Eligible again from ${nextDate.toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" })}.`;
 }
 
-/* ---------------------------------------------------------------
-   Dialog chrome — flat dark scrim + plain white squircle card,
-   exactly the two-layer look of the reference screenshots (dimmed
-   app behind, crisp panel in front). No gradients, no brand tint.
------------------------------------------------------------------- */
 /**
  * Camera-based identity capture. Important honesty note baked into the UI
  * copy itself: this captures a photo into the browser's local storage only.
@@ -1667,49 +1659,20 @@ function IdentityCapture({ hasPhoto, onSave, onRemove, onAlsoSetProfilePhoto }) 
  *  fixed, pointer-events disabled, sits behind the card via z-index. */
 function AmbientBackground() {
   return (
-    <div className="fixed inset-0 pointer-events-none overflow-hidden" style={{ zIndex: 0 }}>
-      <div
-        className="absolute rounded-full"
-        style={{
-          width: 520,
-          height: 520,
-          top: "-12%",
-          left: "-8%",
-          background: "radial-gradient(circle at 30% 30%, rgba(214,48,63,0.35), transparent 70%)",
-          filter: "blur(60px)",
-          animation: "drift1 16s ease-in-out infinite",
-        }}
-      />
-      <div
-        className="absolute rounded-full"
-        style={{
-          width: 460,
-          height: 460,
-          bottom: "-14%",
-          right: "-6%",
-          background: "radial-gradient(circle at 60% 40%, rgba(120,110,255,0.28), transparent 70%)",
-          filter: "blur(70px)",
-          animation: "drift2 20s ease-in-out infinite",
-        }}
-      />
-      <div
-        className="absolute rounded-full"
-        style={{
-          width: 380,
-          height: 380,
-          top: "30%",
-          right: "18%",
-          background: "radial-gradient(circle at 50% 50%, rgba(253,226,228,0.22), transparent 70%)",
-          filter: "blur(50px)",
-          animation: "drift3 24s ease-in-out infinite",
-        }}
-      />
-      <div
-        className="absolute inset-0"
-        style={{
-          backgroundImage: "radial-gradient(rgba(255,255,255,0.06) 1px, transparent 1px)",
-          backgroundSize: "26px 26px",
-        }}
+    <div 
+      className="fixed inset-0 pointer-events-none" 
+      style={{ 
+        zIndex: 0,
+        backgroundImage: "url('https://plus.unsplash.com/premium_photo-1668447589201-3e1f677c0cba?q=80&w=1470&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D')",
+        backgroundSize: "cover",
+        backgroundPosition: "center",
+        backgroundRepeat: "no-repeat"
+      }}
+    >
+      {/* Dark overlay to ensure the white card pops and remains readable */}
+      <div 
+        className="absolute inset-0" 
+        style={{ backgroundColor: "rgba(0, 0, 0, 0.5)" }} 
       />
     </div>
   );
