@@ -2,7 +2,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import RaktJaal from "./RaktJaal.jsx";
-import AuthPage from "./Authpage.jsx";
+import AuthPage from "./AuthPage.jsx";
 import ProfilePage from "./Profilepage.jsx";
 import ActionPage from "./ActionPage.jsx";
 import "./index.css";

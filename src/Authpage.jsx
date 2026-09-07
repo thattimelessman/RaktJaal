@@ -28,6 +28,9 @@ const C = {
   lilac: "#E7E1FF",
   mint: "#DEF5E4",
   sky: "#DCEEFF",
+  cream: "#EDEAE3",
+  stage: "#F7F5F0",
+  field: "#F2F0EA",
 };
 
 const FD = "'Plus Jakarta Sans', sans-serif";
@@ -36,12 +39,33 @@ const FM = "'JetBrains Mono', monospace";
 
 const FONT_IMPORT = `
 @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
-@keyframes float { 0%,100% { transform: translateY(0px); } 50% { transform: translateY(-14px); } }
 @keyframes pulseRing { 0% { transform: scale(0.9); opacity: 0.6; } 70% { transform: scale(1.6); opacity: 0; } 100% { opacity: 0; } }
 @keyframes fadeUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes dash { to { stroke-dashoffset: 0; } }
 @keyframes cardIn { from { opacity: 0; transform: translateY(18px) scale(0.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
 @keyframes shake { 10%,90% { transform: translateX(-1px); } 20%,80% { transform: translateX(2px); } 30%,50%,70% { transform: translateX(-4px); } 40%,60% { transform: translateX(4px); } }
+@keyframes trace { 0%, 100% { stroke-dashoffset: 800; } 50% { stroke-dashoffset: 0; } }
+@keyframes dashLoop { to { stroke-dashoffset: -100; } }
+@keyframes triFlicker {
+  0%, 100% {
+    transform: translate(0px, 0px);
+    text-shadow: -2px -2px 0px #FFD400, 2px 2px 0px #1E3FFF;
+  }
+  25% {
+    transform: translate(1px, -1px);
+    text-shadow: -3px 0px 0px #FFD400, 3px 2px 0px #1E3FFF;
+  }
+  50% {
+    transform: translate(-1px, 1px);
+    text-shadow: -1px -3px 0px #FFD400, 1px 3px 0px #1E3FFF;
+  }
+  75% {
+    transform: translate(1px, 1px);
+    text-shadow: -2px 1px 0px #FFD400, 2px -1px 0px #1E3FFF;
+  }
+}
+.hide-scroll { -ms-overflow-style: none; scrollbar-width: none; }
+.hide-scroll::-webkit-scrollbar { display: none; }
 `;
 
 /* Real, common inbox providers — extend this list if you need more. */
@@ -94,8 +118,8 @@ function Field({ icon: Icon, error, ...props }) {
   return (
     <div>
       <div
-        className="flex items-center gap-3 rounded-2xl px-4 py-3.5 bg-white transition-all duration-200"
-        style={{ border: `1.5px solid ${error ? C.brick : `${C.ink}22`}` }}
+        className="flex items-center gap-3 rounded-full px-5 py-3.5 transition-all duration-200"
+        style={{ background: error ? `${C.brick}0D` : C.field, border: `1.5px solid ${error ? C.brick : "transparent"}` }}
       >
         <Icon size={17} style={{ color: error ? C.brick : C.sub }} className="shrink-0" />
         <input
@@ -122,8 +146,8 @@ function PasswordField({ value, onChange, placeholder = "Password", showRules = 
   return (
     <div>
       <div
-        className="flex items-center gap-3 rounded-2xl px-4 py-3.5 bg-white transition-all duration-200"
-        style={{ border: `1.5px solid ${value && !allGood && !focused ? C.brick : `${C.ink}22`}` }}
+        className="flex items-center gap-3 rounded-full px-5 py-3.5 transition-all duration-200"
+        style={{ background: value && !allGood && !focused ? `${C.brick}0D` : C.field, border: `1.5px solid ${value && !allGood && !focused ? C.brick : "transparent"}` }}
       >
         <Lock size={17} style={{ color: C.sub }} className="shrink-0" />
         <input
@@ -194,16 +218,14 @@ function GoogleButton({ label = "Sign in with Google" }) {
         type="button"
         onClick={handleGoogleAuth}
         disabled={pending}
-        className="relative w-full flex items-center justify-center py-3 rounded-2xl text-[15px] font-bold bg-white transition-all duration-200 hover:bg-[#F9F9F8] active:scale-[0.98] disabled:opacity-60"
+        className="w-full flex items-center justify-center gap-2.5 py-3.5 rounded-full text-[15px] font-bold bg-white transition-all duration-200 hover:bg-[#F9F9F8] active:scale-[0.98] disabled:opacity-60"
         style={{ border: `1.5px solid ${C.ink}1A`, fontFamily: FB, color: C.ink }}
       >
-        <span className="absolute left-4 top-1/2 -translate-y-1/2 flex items-center justify-center">
-          {pending ? (
-            <span className="w-[18px] h-[18px] rounded-full border-2 border-t-transparent animate-spin" style={{ borderColor: `${C.ink}33`, borderTopColor: "transparent" }} />
-          ) : (
-            <GoogleGlyph />
-          )}
-        </span>
+        {pending ? (
+          <span className="w-[18px] h-[18px] rounded-full border-2 border-t-transparent animate-spin" style={{ borderColor: `${C.ink}33`, borderTopColor: "transparent" }} />
+        ) : (
+          <GoogleGlyph />
+        )}
         {label}
       </button>
       {notice && (
@@ -228,67 +250,173 @@ function OrDivider() {
   );
 }
 
-function VitalsLine() {
+/* ---------------- New Sketchy Illustrations & Taglines ---------------- */
+
+function SaveLifeIllustration() {
   return (
-    <svg viewBox="0 0 300 40" className="w-full h-10" preserveAspectRatio="none">
-      <polyline
-        points="0,20 45,20 56,8 67,32 78,20 120,20 131,10 142,30 153,20 300,20"
-        fill="none" stroke={C.brick} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-        style={{ strokeDasharray: 520, strokeDashoffset: 520, animation: "dash 3s ease-in-out infinite" }}
+    <svg width="260" height="260" viewBox="0 0 260 260" fill="none" style={{ overflow: "visible" }}>
+      {/* Restored Yellow Leaf Base */}
+      <path 
+        d="M 50 210 C 100 170, 200 180, 230 210 C 180 250, 80 240, 50 210 Z" 
+        fill="#FCE3A1" 
+        style={{ animation: "fadeUp 1.5s ease" }} 
       />
+      
+      {/* Sketchy Black Leaf Outline tracking the yellow shape */}
+      <g style={{ strokeDasharray: 800, animation: "trace 8s ease-in-out infinite" }}>
+        <path 
+          d="M 45 215 C 105 165, 210 175, 240 210 C 185 255, 75 245, 45 215 Z" 
+          stroke={C.ink} 
+          strokeWidth="1.2" 
+          fill="none" 
+          strokeLinecap="round" 
+        />
+        {/* Leaf Stem */}
+        <path d="M 15 245 C 25 235, 35 225, 45 215" stroke={C.ink} strokeWidth="1.2" fill="none" strokeLinecap="round" />
+      </g>
+      
+      {/* Crisp Cloud Outline */}
+      <path 
+        d="M 90 170 C 50 170, 30 140, 45 100 C 30 60, 80 30, 110 50 C 130 20, 180 30, 180 70 C 220 80, 200 140, 170 150 C 150 170, 120 175, 90 170" 
+        stroke={C.ink} 
+        strokeWidth="1.2" 
+        fill="none" 
+        strokeLinecap="round"
+        style={{ strokeDasharray: 600, animation: "trace 8s ease-in-out infinite" }} 
+      />
+
+      {/* Red Heart/Leaf shape */}
+      <path 
+        d="M 170 155 C 150 125, 175 105, 185 125 C 205 90, 240 120, 225 160 C 210 200, 180 180, 170 155 Z" 
+        fill={C.brick} 
+        opacity="0" 
+        style={{ animation: "fadeUp 1s ease forwards 1s" }} 
+      />
+
+      {/* Text annotations */}
+      <text x="80" y="105" fontFamily={FM} fontSize="13" fill={C.ink} opacity="0" style={{ animation: "fadeUp 1s ease forwards 0.5s" }}>
+        save a life
+      </text>
+      <text x="88" y="125" fontFamily={FM} fontSize="13" fill={C.sub} opacity="0" style={{ animation: "fadeUp 1s ease forwards 0.8s" }}>
+        today.
+      </text>
     </svg>
   );
 }
 
-function BrandPanel() {
+function RightPaneIllustration() {
   return (
-    <div className="relative hidden lg:flex flex-col justify-between w-1/2 min-h-screen p-12 overflow-hidden" style={{ background: C.ink }}>
-      <div
-        className="absolute -top-24 -left-24 w-[420px] h-[420px] opacity-[0.14]"
-        style={{ background: C.brick, borderRadius: "40% 60% 70% 30% / 40% 50% 60% 50%", animation: "float 8s ease-in-out infinite" }}
-      />
-      <div
-        className="absolute bottom-[-140px] right-[-100px] w-[320px] h-[320px] opacity-[0.08]"
-        style={{ background: C.sky, borderRadius: "60% 40% 30% 70% / 50% 60% 40% 50%", animation: "float 10s ease-in-out infinite reverse" }}
-      />
+    <svg width="280" height="350" viewBox="0 0 400 500" fill="none" style={{ overflow: "visible" }}>
+      <defs>
+        <clipPath id="bagInner">
+          <rect x="131.5" y="381.5" width="137" height="177" rx="13.5" />
+        </clipPath>
+      </defs>
 
-      <Link to="/" className="relative flex items-center gap-2 z-10">
-        <BrandMark size={28} />
-        <span className="text-xl font-bold tracking-tight text-white" style={{ fontFamily: FD }}>RaktJaal</span>
-      </Link>
+      {/* Blood Bag */}
+      <g style={{ animation: "fadeUp 1.5s ease forwards 0.6s", opacity: 0 }}>
+        {/* Bag Outline */}
+        <rect x="130" y="380" width="140" height="180" rx="15" fill={C.paper} fillOpacity="0.95" stroke={C.ink} strokeWidth="3" />
+        
+        {/* Animated Waving Blood */}
+        <g clipPath="url(#bagInner)">
+          {/* Deep Blood Base */}
+          <rect x="130" y="425" width="140" height="150" fill={C.brickDark} />
+          
+          {/* Waving Blood Surface */}
+          <path 
+            d="M 130 425 q 35 -12 70 0 t 70 0 t 70 0 t 70 0 t 70 0 t 70 0 l 0 50 l -420 0 z" 
+            fill={C.brick}
+          >
+            <animateTransform
+              attributeName="transform"
+              type="translate"
+              from="0 0"
+              to="-140 0"
+              dur="2.5s"
+              repeatCount="indefinite"
+            />
+          </path>
+        </g>
+        
+        {/* Medical Label */}
+        <rect x="150" y="440" width="100" height="70" rx="4" fill={C.paper} stroke={`${C.ink}22`} strokeWidth="1" />
+        <rect x="160" y="450" width="30" height="30" fill={C.stage} />
+        <path d="M 175,455 L 175,475 M 165,465 L 185,465" stroke={C.brick} strokeWidth="4" strokeLinecap="round" /> {/* Red Cross */}
+        <line x1="200" y1="455" x2="240" y2="455" stroke={C.sub} strokeWidth="2" strokeLinecap="round" />
+        <line x1="200" y1="465" x2="230" y2="465" stroke={C.sub} strokeWidth="2" strokeLinecap="round" />
+        <line x1="160" y1="490" x2="240" y2="490" stroke={C.sub} strokeWidth="2" strokeLinecap="round" />
+        <line x1="160" y1="500" x2="220" y2="500" stroke={C.sub} strokeWidth="2" strokeLinecap="round" />
 
-      <div className="relative z-10">
-        <p className="text-xs uppercase tracking-wider mb-4" style={{ color: C.blush, fontFamily: FM }}>Why this matters</p>
-        <h2 className="text-4xl font-medium leading-[1.1] tracking-tight mb-8" style={{ color: "#fff", fontFamily: FD }}>
-          Every drop finds
-          <br />
-          somewhere to go —
-          <br />
-          <span style={{ color: C.brick }}>instantly.</span>
-        </h2>
+        {/* Top Hanger */}
+        <path d="M 190,380 L 190,360 Q 200,350 210,360 L 210,380" fill="none" stroke={C.sub} strokeWidth="5" strokeLinecap="round" />
+      </g>
+    </svg>
+  );
+}
 
-        <div className="rounded-2xl p-5 backdrop-blur-sm" style={{ background: "#FFFFFF0D", border: "1px solid #FFFFFF1F" }}>
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full" style={{ background: "#5FD07A" }} />
-              <span className="text-xs uppercase tracking-wider text-white" style={{ fontFamily: FM }}>Match found</span>
-            </div>
-            <span className="text-xs" style={{ color: C.blush, fontFamily: FM }}>Nearby You</span>
-          </div>
-          <VitalsLine />
-          <div className="flex items-center gap-2 mt-2">
-            <ShieldCheck size={13} color={C.blush} />
-            <p className="text-xs" style={{ color: "#FFFFFFB3", fontFamily: FB }}>Contact only unlocks once a donor accepts.</p>
-          </div>
-        </div>
+function LeftTagline() {
+  return (
+    <div className="w-[260px] text-right" style={{ animation: "fadeUp 1.5s ease forwards 0.3s", opacity: 0 }}>
+      <div className="flex items-center justify-end gap-2 mb-3">
+        <div className="w-1.5 h-1.5 rounded-full" style={{ background: "#1F6B3A" }} />
+        <p className="text-[10px] tracking-[0.2em] font-bold uppercase" style={{ color: "#1F6B3A", fontFamily: FB }}>
+          Why This Matters
+        </p>
       </div>
-
-      <p className="relative z-10 text-xs" style={{ color: "#FFFFFF66", fontFamily: FB }}>
-        A student prototype, not yet a registered product.
-      </p>
+      <h2 className="text-[1.65rem] leading-[1.25] font-extrabold tracking-tight text-right" style={{ color: C.ink, fontFamily: FB }}>
+        Every drop finds <br />
+        <span style={{ color: C.sub }}>somewhere to go</span> <br />
+        <span style={{ color: C.brick }}>instantly.</span>
+      </h2>
     </div>
   );
 }
+
+function SuperheroTagline() {
+  return (
+    <div className="w-[220px] text-left" style={{ animation: "fadeUp 1.5s ease forwards 0.3s", opacity: 0 }}>
+      <div style={{ color: C.sub, fontSize: "15px", fontFamily: FD, fontWeight: 600, letterSpacing: "0.5px", marginBottom: "6px" }}>
+        You Can Be Someone's
+      </div>
+            <div
+        style={{
+          color: "#E5202E",
+          fontSize: "42px",
+          fontFamily: FD,
+          fontWeight: 800,
+          letterSpacing: "0.5px",
+          lineHeight: 1,
+          display: "inline-block",
+          animation: "triFlicker 1.8s ease-in-out infinite"
+        }}
+      >
+        SUPERHERO!
+      </div>
+    </div>
+  );
+}
+
+function RightTagline() {
+  return (
+    
+    <div className="w-[260px] text-right flex flex-col items-end" style={{ animation: "fadeUp 1.5s ease forwards 0.5s", opacity: 0 }}>
+      <div className="flex items-center gap-2 mb-3">
+        <div className="w-1.5 h-1.5 rounded-full bg-[#1F6B3A] animate-pulse" />
+        
+        <p className="text-[10px] tracking-[0.2em] font-bold uppercase" style={{ color: "#1F6B3A", fontFamily: FM }}>
+          Privacy First
+        </p>
+      </div>
+      <h2 className="text-[1.65rem] leading-[1.25] font-extrabold tracking-tight text-right" style={{ color: C.ink, fontFamily: FB }}>
+        Contact info <br />
+        <span style={{ color: C.sub }}>only unlocks when</span> <br />
+        a donor <span style={{ color: C.brick }}>accepts.</span>
+      </h2>
+    </div>
+  );
+}
+
 
 /* ---------------- Login form ---------------- */
 
@@ -317,7 +445,7 @@ function LoginForm({ onSwitch }) {
   return (
     <form
       onSubmit={handleSubmit}
-      className="w-full max-w-sm"
+      className="w-full max-w-sm mx-auto"
       style={{ animation: shake ? "shake 0.4s ease" : undefined }}
     >
       <h1 className="text-3xl font-bold tracking-tight mb-2" style={{ color: C.ink, fontFamily: FD }}>Welcome back</h1>
@@ -346,7 +474,7 @@ function LoginForm({ onSwitch }) {
 
       <button
         type="submit"
-        className="w-full mt-6 py-3.5 rounded-2xl text-white text-sm font-semibold flex items-center justify-center gap-2 transition-all duration-200 hover:scale-[1.015] active:scale-95"
+        className="w-full mt-6 py-3.5 rounded-full text-white text-sm font-semibold flex items-center justify-center gap-2 transition-all duration-200 hover:scale-[1.015] active:scale-95"
         style={{ background: C.brick, fontFamily: FB }}
       >
         Log in <ArrowRight size={15} />
@@ -355,7 +483,7 @@ function LoginForm({ onSwitch }) {
       <OrDivider />
       <GoogleButton label="Sign in with Google" />
 
-      <p className="text-sm text-center mt-8" style={{ color: C.sub, fontFamily: FB }}>
+      <p className="text-sm text-center mt-8 pb-4" style={{ color: C.sub, fontFamily: FB }}>
         New to RaktJaal?{" "}
         <button type="button" onClick={onSwitch} className="font-semibold hover:underline" style={{ color: C.ink }}>
           Create an account
@@ -399,8 +527,6 @@ function validatePincode(v) {
 
 async function lookupPincode(pincode) {
   try {
-    // ATTEMPT 1: Official Indian Post API (Highest precision, but unstable)
-    // We wrap this in a strict 3-second timeout so it never hangs forever.
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 3000);
     
@@ -418,12 +544,9 @@ async function lookupPincode(pincode) {
         }
       }
     } catch (err) {
-      // If the postal API times out (takes > 3s) or crashes, we catch it here 
-      // and instantly fall through to Attempt 2.
       clearTimeout(timeoutId);
     }
 
-    // ATTEMPT 2: OpenStreetMap (Nominatim) API (Lightning fast, reliable, high precision fallback)
     const nomRes = await fetch(`https://nominatim.openstreetmap.org/search?postalcode=${pincode}&country=india&format=json&addressdetails=1`);
     if (!nomRes.ok) return null;
     
@@ -442,12 +565,10 @@ async function lookupPincode(pincode) {
         if (state.includes("Delhi")) state = "Delhi";
       }
       
-      // OpenStreetMap provides highly specific local data. We cascade down to find the most precise area.
       const locality = addr.suburb || addr.neighbourhood || addr.village || addr.town || addr.city || addr.state_district;
       if (locality) localities.add(locality);
     });
 
-    // Ensure the returned state perfectly matches our dropdown array
     const matchedState = INDIAN_STATES.find(s => 
       state.toLowerCase().includes(s.toLowerCase()) || s.toLowerCase().includes(state.toLowerCase())
     ) || state;
@@ -458,7 +579,7 @@ async function lookupPincode(pincode) {
     return { state: matchedState, localities: localityArray };
     
   } catch {
-    return null; // Both APIs failed, safely fall back to manual entry
+    return null; 
   }
 }
 
@@ -694,7 +815,7 @@ function RegisterForm({ onSwitch }) {
   return (
     <form
       onSubmit={handleSubmit}
-      className="w-full max-w-sm"
+      className="w-full max-w-sm mx-auto"
       style={{ animation: shake ? "shake 0.4s ease" : undefined }}
     >
       <h1 className="text-3xl font-bold tracking-tight mb-2" style={{ color: C.ink, fontFamily: FD }}>Create your account</h1>
@@ -705,19 +826,19 @@ function RegisterForm({ onSwitch }) {
       <div className="flex flex-col gap-3.5">
         <Field icon={User} required value={form.name} onChange={update("name")} placeholder="Full name" />
         <div className="relative">
-          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-            <CalendarDays size={18} color="#A1A1AA" />
+          <div className="absolute inset-y-0 left-0 pl-5 flex items-center pointer-events-none">
+            <CalendarDays size={17} color={C.sub} />
           </div>
           <input
             type="date"
             name="dob"
             value={form.dob || ""}
             onChange={update("dob")}
-            className="w-full pl-10 pr-4 py-3 rounded-2xl text-sm outline-none transition-colors"
+            className="w-full pl-11 pr-5 py-3.5 rounded-full text-sm outline-none transition-colors"
             style={{
-              backgroundColor: "#FFFFFF",
-              border: `1.5px solid ${C.ink}22`,
-              color: form.dob ? C.ink : "#A1A1AA", 
+              backgroundColor: C.field,
+              border: "1.5px solid transparent",
+              color: form.dob ? C.ink : "#A1A1AA",
               fontFamily: FB
             }}
           />
@@ -757,7 +878,7 @@ function RegisterForm({ onSwitch }) {
           </div>
         )}
 
-        <div className="flex items-center gap-3 rounded-2xl px-4 py-3.5 bg-white transition-all duration-200" style={{ border: `1.5px solid ${C.ink}22` }}>
+        <div className="flex items-center gap-3 rounded-full px-5 py-3.5 transition-all duration-200" style={{ background: C.field, border: "1.5px solid transparent" }}>
           <Droplet size={17} style={{ color: C.sub }} className="shrink-0" />
           <select
             value={form.bloodType}
@@ -776,7 +897,7 @@ function RegisterForm({ onSwitch }) {
 
       <button
         type="submit"
-        className="w-full mt-6 py-3.5 rounded-2xl text-white text-sm font-semibold flex items-center justify-center gap-2 transition-all duration-200 hover:scale-[1.015] active:scale-95"
+        className="w-full mt-6 py-3.5 rounded-full text-white text-sm font-semibold flex items-center justify-center gap-2 transition-all duration-200 hover:scale-[1.015] active:scale-95"
         style={{ background: C.brick, fontFamily: FB }}
       >
         Create account <ArrowRight size={15} />
@@ -785,7 +906,7 @@ function RegisterForm({ onSwitch }) {
       <OrDivider />
       <GoogleButton label="Sign in with Google" />
 
-      <p className="text-sm text-center mt-8" style={{ color: C.sub, fontFamily: FB }}>
+      <p className="text-sm text-center mt-8 pb-4" style={{ color: C.sub, fontFamily: FB }}>
         Already have an account?{" "}
         <button type="button" onClick={onSwitch} className="font-semibold hover:underline" style={{ color: C.ink }}>
           Log in
@@ -801,50 +922,99 @@ export default function AuthPage({ initialMode = "login" }) {
   const [mode, setMode] = useState(initialMode);
 
   return (
-    <div className="min-h-screen flex" style={{ background: C.paper }}>
+    <div className="min-h-screen flex items-center justify-center p-4 md:p-8" style={{ background: C.cream }}>
       <style>{FONT_IMPORT}</style>
 
-      <BrandPanel />
+      <div
+        className="relative w-full max-w-6xl rounded-[2.5rem] overflow-hidden flex items-center justify-center py-12 px-6 md:px-16"
+        style={{ background: C.stage, minHeight: 700 }}
+      >
+        <div className="absolute top-8 left-8 z-30 flex flex-col items-start">
+          <Link to="/" className="inline-flex items-center gap-2 relative z-10">
+            <BrandMark size={30} />
+            <span className="text-xl font-bold tracking-tight" style={{ color: C.ink, fontFamily: FD }}>RaktJaal</span>
+          </Link>
+          
+          {/* Clickable Sketch Arrow with Tooltip (Untouched) */}
+          <Link to="/" className="relative group mt-0.5 ml-2 cursor-pointer">
+            <svg width="120" height="24" viewBox="0 0 120 24" fill="none" className="overflow-visible">
+              <path 
+                d="M 16 10 L 6 16 L 16 22 M 6 16 Q 50 10 110 14" 
+                stroke={C.brick} 
+                strokeWidth="1.5" 
+                strokeLinecap="round" 
+                strokeLinejoin="round" 
+                style={{ strokeDasharray: 200, strokeDashoffset: 200, animation: "dash 1.5s ease-out forwards 0.5s" }} 
+              />
+            </svg>
+            <div 
+              className="absolute top-full left-0 mt-2 opacity-0 group-hover:opacity-100 transition-opacity bg-white text-[11px] px-2.5 py-1.5 rounded shadow-sm border pointer-events-none whitespace-nowrap" 
+              style={{ color: C.ink, fontFamily: FB, borderColor: `${C.ink}22` }}
+            >
+              go back to home page
+            </div>
+          </Link>
+        </div>
 
-      <div className="w-full lg:w-1/2 flex flex-col items-center justify-center px-6 py-12 relative">
-        <Link to="/" className="lg:hidden flex items-center gap-2 mb-10">
-          <BrandMark size={26} />
-          <span className="text-lg font-bold tracking-tight" style={{ color: C.ink, fontFamily: FD }}>RaktJaal</span>
-        </Link>
+        {/* --- LEFT COLUMN: Superhero tagline, sits above the save-a-life illustration --- */}
+        <div className="hidden lg:block absolute left-10 top-[38%] -translate-y-1/2 z-0 pointer-events-none">
+          <SuperheroTagline />
+        </div>
+
+        {/* --- RIGHT COLUMN: Why This Matters + Privacy First, stacked together --- */}
+        <div className="hidden lg:flex flex-col items-end gap-10 absolute right-10 top-1/2 -translate-y-1/2 z-0 pointer-events-none">
+          <LeftTagline />
+          <RightTagline />
+        </div>
+
+        <div className="hidden lg:block absolute left-6 bottom-6 opacity-90 pointer-events-none">
+          <SaveLifeIllustration />
+        </div>
+
+        <div className="hidden lg:block absolute right-8 bottom-6 opacity-90 pointer-events-none">
+          <RightPaneIllustration />
+        </div>
 
         <div
           key={mode}
-          className="w-full max-w-sm rounded-[2rem] p-8 md:p-9"
+          className="relative z-10 w-full max-w-sm rounded-[2rem] bg-white flex flex-col hide-scroll"
           style={{
-            background: "#fff",
-            border: `1px solid ${C.ink}12`,
-            boxShadow: "0 30px 60px -30px rgba(20,17,15,0.25)",
+            height: "660px",
+            boxShadow: "0 30px 60px -25px rgba(20,17,15,0.22)",
             animation: "cardIn 0.4s cubic-bezier(.22,.61,.36,1)",
           }}
         >
-          <div className="w-full flex rounded-full p-1 mb-8" style={{ background: "#F4F2EF" }}>
-            {["login", "register"].map((m) => (
-              <button
-                key={m}
-                onClick={() => setMode(m)}
-                className="flex-1 py-2 rounded-full text-sm font-semibold transition-all duration-200"
-                style={{
-                  fontFamily: FB,
-                  background: mode === m ? C.ink : "transparent",
-                  color: mode === m ? "#fff" : C.sub,
-                }}
-              >
-                {m === "login" ? "Log in" : "Register"}
-              </button>
-            ))}
+          <div className="p-8 md:p-9 pb-4 shrink-0">
+            <div className="w-full flex rounded-full p-1" style={{ background: C.field }}>
+              {["login", "register"].map((m) => (
+                <button
+                  key={m}
+                  onClick={() => setMode(m)}
+                  className="flex-1 py-2 rounded-full text-sm font-semibold transition-all duration-200"
+                  style={{
+                    fontFamily: FB,
+                    background: mode === m ? C.ink : "transparent",
+                    color: mode === m ? "#fff" : C.sub,
+                  }}
+                >
+                  {m === "login" ? "Log in" : "Register"}
+                </button>
+              ))}
+            </div>
           </div>
 
-          {mode === "login" ? (
-            <LoginForm onSwitch={() => setMode("register")} />
-          ) : (
-            <RegisterForm onSwitch={() => setMode("login")} />
-          )}
+          <div className="px-8 md:px-9 pb-8 md:pb-9 pt-0 flex-1 overflow-y-auto hide-scroll">
+            {mode === "login" ? (
+              <LoginForm onSwitch={() => setMode("register")} />
+            ) : (
+              <RegisterForm onSwitch={() => setMode("login")} />
+            )}
+          </div>
         </div>
+
+        <p className="absolute bottom-6 left-1/2 -translate-x-1/2 text-xs text-center z-10" style={{ color: C.sub, fontFamily: FB }}>
+          A student prototype, not yet a registered product.
+        </p>
       </div>
     </div>
   );
