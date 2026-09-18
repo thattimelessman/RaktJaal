@@ -1,0 +1,41 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Donors: anyone can read the fields needed to render a match card,
+    // but only the authenticated donor (uid from email/password or Google
+    // sign-in) can create/update their own document, keyed by their
+    // Firebase Auth uid. Phone number is included in reads for now
+    // (Phase 1 has no field-level read restriction) — the app layer simply
+    // never displays it. Phase 2 should move `phone` into a subcollection
+    // guarded by request-level "I can help" reveals if stricter
+    // server-side enforcement is needed.
+    match /donors/{donorId} {
+      allow read: if true;
+      allow create: if request.auth != null && request.auth.uid == donorId;
+      allow update: if request.auth != null && request.auth.uid == donorId;
+      allow delete: if false;
+    }
+
+    // Users: the account/profile doc every signed-in person has (name, dob,
+    // address, bloodType, phone, profile photo, etc — see src/lib/userProfile.ts).
+    // Only the owner can read or write their own doc, keyed by Firebase Auth uid.
+    match /users/{uid} {
+      allow read: if request.auth != null && request.auth.uid == uid;
+      allow create: if request.auth != null && request.auth.uid == uid;
+      allow update: if request.auth != null && request.auth.uid == uid;
+      allow delete: if request.auth != null && request.auth.uid == uid;
+    }
+
+    // Requests: anyone can post a request or read open requests (no auth
+    // gate in Phase 1, matching the "no login friction" hospital-view goal
+    // from the demo script). Tighten this once hospital accounts exist.
+    match /requests/{requestId} {
+      allow read: if true;
+      allow create: if true;
+      allow update: if true; // needed for status changes (fulfilled/expired)
+      allow delete: if false;
+    }
+  }
+}

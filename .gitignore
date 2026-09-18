@@ -1,24 +1,44 @@
-# Logs
-logs
-*.log
+# dependencies
+node_modules/
+/.pnp
+.pnp.js
+
+# next.js build output
+/.next/
+/out/
+
+# production build
+/build
+
+# environment variables (contains your secrets)
+.env
+.env.local
+.env.*.local
+
+# firebase
+.firebase/
+firebase-debug.log*
+firebase-debug.*.log*
+serviceAccountKey.json
+*-firebase-adminsdk-*.json
+
+# logs
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
-lerna-debug.log*
 
-node_modules
-dist
-dist-ssr
-*.local
+# typescript
+*.tsbuildinfo
 
-# Editor directories and files
-.vscode/*
-!.vscode/extensions.json
-.idea
+# testing
+/coverage
+
+# vercel
+.vercel
+
+# editor / OS files
+.vscode/
+.idea/
 .DS_Store
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
+Thumbs.db

@@ -1,159 +1,144 @@
-# RaktJaal — Hyperlocal Blood Donor Matching Platform
+# RaktJaal
 
-A real-time platform that replaces the "WhatsApp-forward-and-pray" routine for finding blood donors with targeted, distance-and-urgency-matched alerts — built as a CS-DS academic mini project at PSIT Kanpur.
+From social media chaos to 30-second donor matches.
 
-**Status: active build. Frontend is in place; backend (Supabase) is being wired in next — see [Roadmap](#-roadmap) below.**
+This repo implements **Phase 1 (Core flow)** end-to-end, using **email/password
+and Google sign-in** for donor authentication, and is scaffolded so Phases
+2–5 are focused additions rather than rewrites.
 
----
+## What's built (Phase 1)
 
-## 🩸 What Does It Do?
+- **Auth** — `/login` and `/signup`: email/password (Firebase Auth) plus a
+  "Continue with Google" button (`signInWithPopup`). Either path lands the
+  user with a Firebase Auth `uid`, which is what donor documents are keyed
+  by in Firestore.
+- **Requester form** — `/request`: blood type, units, hospital, location
+  (browser geolocation or manual lat/lng), urgency, contact number. No
+  login required to post a request — matches the "no login friction"
+  hospital-view goal from the demo script.
+- **Donor signup** — `/donor/signup`: requires sign-in (redirects to
+  `/login?redirect=/donor/signup` if not authenticated), then collects
+  name, phone, blood type, and location, and writes to
+  `donors/{uid}`.
+- **Static matching** — on submit, the requester is routed to
+  `/request/[id]`, which runs a one-shot Firestore query for donors of the
+  matching blood type within a geohash box around the request, filters to
+  a true 10km radius (haversine), and sorts nearest-first.
+- **Privacy-first by default**: donor phone numbers are never rendered in
+  the match list, even though Phase 1's Firestore rules don't yet enforce
+  that server-side — see the "Security" note below.
 
-RaktJaal is built around one problem: urgent blood requests usually get seen too late, not because no one would help, but because the right donor never saw the post. RaktJaal replaces mass-forwarding with a system that posts a request once and pushes it straight to nearby, matching, eligible donors.
+## Stack
 
-**Core idea:**
-- A requester posts blood type, units needed, and hospital location
-- The system matches donors by blood type and distance (10km radius target)
-- Matched donors get notified — no manual sharing, no guesswork
-- A donor accepts, and contact details unlock in-app (no public numbers)
+| Layer | Tech |
+|---|---|
+| Frontend | Next.js 14 (App Router) + TypeScript + Tailwind |
+| Auth | Firebase Auth — email/password + Google sign-in |
+| Backend/DB | Firebase Firestore |
+| Geo matching | `ngeohash` + haversine distance, client-side query |
 
----
+## Getting started
 
-## ✨ Features
-
-### Landing Page
-- **Coverage checker**: Enter a city to check live coverage, with a graceful "not live here yet" fallback
-- **Live feed mock**: Requests sorted by distance and urgency, nearest and most time-critical always on top
-- **Emergency mode**: Life-critical requests get a red flag and a live countdown timer
-- **Scroll-reveal storytelling**: Animated sections explaining how matching, verification, and one-tap accept work
-- **Stats strip**: Target alert time, match radius, and the "seen too late" problem stated in numbers
-
-### Authentication
-- **Login / Register** flows with shared visual language and route-based mode switching (`/login`, `/register`)
-- **Real email validation**: Full-address format check against a real provider allowlist (Gmail, Outlook, Yahoo, iCloud, etc.)
-- **Password strength rules**: Live checks for length, uppercase, number, and symbol as the user types
-- **Per-account data isolation**: Each email gets its own directory entry — no shared or leaked state between accounts
-
-### Profile
-- **Editorial single-column layout**: Sparse, scannable profile after several rejected denser designs
-- **Inline field editing**: Name, phone, address — edit-in-place with validation, not modal forms
-- **Client-side photo pipeline**: Upload, crop-to-fit, and canvas-compress profile photos under a byte-size cap before storage
-- **Pincode → address autofill**: Looks up city/state from a pincode and lets the user confirm before saving
-- **Blood type picker**: Dedicated selector tied to donor eligibility
-- **Donation history + eligibility**: Tracks past donations and computes the next eligible donation date
-- **Security surface**: 2FA setup flow, phone OTP verification, and a type-to-confirm delete-account flow
-- **Identity capture**: Separate ID document capture, decoupled from the profile photo
-
-### Data Layer (current)
-- **`authStore.js`** is a deliberate placeholder: a small directory keyed by email, backed by `localStorage`, with the logged-in pointer in `sessionStorage`
-- Every function (`registerUser`, `loginUser`, `getCurrentUser`, `saveCurrentUser`, `clearCurrentUser`) is written as a drop-in seam — swapping in real Supabase calls means rewriting this one file, not touching `AuthPage.jsx` or `ProfilePage.jsx`
-
----
-
-## 🛠️ Technology Stack
-
-**Frontend:**
-- React 19
-- Vite (build tool)
-- React Router DOM (client-side routing)
-- Tailwind CSS v4
-- Lucide React (icons)
-
-**Data (current → planned):**
-- `localStorage` / `sessionStorage` placeholder directory → Supabase (auth + Postgres) — not yet wired
-
-**Architecture:**
-- Single-page app, three routes: landing (`/`), auth (`/login`, `/register`), profile (`/profile`)
-- Each page is currently a large, monolithic single-file component (landing, auth, and profile pages each own their full UI — no shared component library yet)
-
----
-
-## 📦 Installation
-
-### Prerequisites
-- Node.js 18+ and npm
-- Git
-
-### Setup
 ```bash
-# Clone the repository
-git clone https://github.com/thattimelessman/raktjaal.git
-cd raktjaal
-
-# Install dependencies
 npm install
+cp .env.local.example .env.local
+```
 
-# Start the dev server
+1. Create a Firebase project at https://console.firebase.google.com
+2. Enable **Firestore Database** (start in production mode) and paste the
+   rules from `firestore.rules` into the Rules tab.
+3. Enable **Authentication → Sign-in method → Email/Password**.
+4. Enable **Authentication → Sign-in method → Google**, and set a support
+   email when prompted.
+5. In Project settings → General → "Your apps", add a Web app and copy the
+   config values into `.env.local`.
+6. The Google sign-in popup requires `localhost` (dev) and your real
+   domain (prod) to be listed in **Authentication → Settings → Authorized
+   domains**. `localhost` is usually pre-authorized.
+
+```bash
 npm run dev
 ```
 
-The app will open at `http://localhost:5173`
+Visit `http://localhost:3000`.
 
-### Build for production
-```bash
-npm run build
-npm run preview
+## Auth model
+
+- Donor documents live at `donors/{uid}`, where `uid` is the Firebase Auth
+  user id — the same value whether the person signed up with email/password
+  or Google. `authProvider` on the donor doc records which one was used
+  (`password` or `google.com`), purely for your own analytics; it doesn't
+  affect matching.
+- A user can sign in with Google today and, if they forget, later try
+  "sign up" with the same email/password — Firebase will throw
+  `auth/account-exists-with-different-credential` in that case, which the
+  app surfaces as a friendly error rather than silently failing.
+- Password reset is wired up via `sendPasswordResetEmail` from the login
+  page's "Forgot password?" link.
+
+## Security note
+
+The included `firestore.rules` are intentionally permissive for Phase 1
+(no hospital accounts yet, per the "no login friction" flow in the demo
+script). Donor documents are readable by anyone so the match query can
+run client-side — the app UI simply never displays the `phone` field
+outside of the donor's own session. Before a public launch, move `phone`
+into a subcollection or a Cloud Function-mediated reveal so it's enforced
+at the database layer too, not just hidden in the UI.
+
+## Roadmap 
+
+**Phase 2 — Real-time**
+- Swap `getDocs` in `src/lib/matching.ts` for `onSnapshot` so the donor
+  list updates live, sorted by distance/urgency.
+- Add a "❤️ I can help" button on `DonorCard` that reveals the
+  requester's contact info only after the donor taps it (and vice versa
+  — reveal the donor's phone to the requester at that point via a
+  Cloud Function, per the security note above).
+
+**Phase 3 — PWA layer**
+- `npm install next-pwa`, uncomment the wrapper in `next.config.js`.
+- Add `public/manifest.json` + icons, enable "Add to Home Screen".
+- Cache last-seen requests and the donor's own profile for offline view.
+
+**Phase 4 — Notifications**
+- Firebase Cloud Messaging (`firebase/messaging`) for web push, using
+  `NEXT_PUBLIC_FCM_VAPID_KEY`.
+- A server-side route (`src/app/api/notify/route.ts`) using the Twilio
+  Node SDK to send SMS/WhatsApp fallback to donors without the PWA
+  installed — env vars are already stubbed in `.env.local.example`.
+
+**Phase 5 — India-specific polish**
+- `next-intl` (or similar) for Hindi/English toggle.
+- Donor badges, ratings, and post-donation health tips as new Firestore
+  collections (`badges`, `reviews`) plus UI on the donor profile.
+- Low-bandwidth mode: lazy-load the Google Maps JS API only when a map
+  view is opened, and keep payloads (e.g. donor list fields) minimal.
+
+## Project structure
+
 ```
-
----
-
-## 🎮 Quick Start
-
-1. **Launch the dev server** (`npm run dev`)
-2. **Land on the homepage** — check the coverage checker, scroll through how-it-works and the feature mocks
-3. **Register a new account** at `/register` — pick a blood type, fill in a real-format email, and a password meeting the strength rules
-4. **Land on your profile** at `/profile` — edit fields inline, upload a profile photo, add your address via pincode lookup
-5. **Log out and log back in** with the same email — your data persists via the placeholder directory (per-browser, not synced across devices yet)
-
----
-
-## 📁 Project Structure
+src/
+  app/
+    page.tsx                  Landing page
+    login/page.tsx            Email/password + Google sign-in
+    signup/page.tsx           Email/password + Google sign-up
+    request/page.tsx          Requester form
+    request/[id]/page.tsx     Match results for a submitted request
+    donor/signup/page.tsx     Donor profile form (auth required)
+    layout.tsx                Root layout, wraps app in AuthProvider
+    globals.css               Tailwind base + shared utility classes
+  components/
+    NavBar.tsx                Header showing signed-in state
+    GoogleButton.tsx           "Continue with Google" button
+    DonorCard.tsx              Donor match result card
+  hooks/
+    useAuth.tsx                Auth context (current Firebase user)
+    useGeolocation.ts          Browser Geolocation API wrapper
+  lib/
+    firebase.ts                Firebase app/Firestore/Auth init
+    auth.ts                    Email/password + Google auth helpers
+    geohash.ts                 Geohash encode + search-cell + haversine
+    matching.ts                 Phase 1 static donor query
+  types/index.ts                Shared types (Donor, BloodRequest, ...)
 ```
-RaktJaal/
-├── src/
-│   ├── RaktJaal.jsx        # Landing page — hero, feature grid, how-it-works, FAQ
-│   ├── Authpage.jsx         # Login + register forms, validation, routing
-│   ├── Profilepage.jsx      # Profile editor — photo, address, security, donation history
-│   ├── Authstore.js         # Placeholder auth/data layer (localStorage/sessionStorage)
-│   ├── main.jsx              # Router setup — /, /login, /register, /profile
-│   ├── index.css
-│   └── assets/
-├── public/
-│   ├── favicon.svg
-│   └── icons.svg
-├── eslint.config.js
-├── vite.config.js
-├── package.json
-└── README.md
-```
-
----
-
-## 🗺️ Roadmap
-
-RaktJaal is being built in stages as part of an ongoing mini project cycle. Near-term:
-
-- [ ] Wire up Supabase (auth + Postgres) behind the existing `authStore.js` seam
-- [ ] Real donor-matching logic (blood type + distance radius, not mocked)
-- [ ] Live request feed backed by real data instead of static UI mocks
-- [ ] Push/SMS notification pipeline for matched donors
-- [ ] Deploy a live demo
-
----
-
-## 🎓 Academic Context
-
-RaktJaal is a mini project for the B.Tech CSE (Data Science) program at PSIT Kanpur, built by a four-person team (**CS-DS-3A-05**).
-
----
-
-## 📧 Contact
-
-Questions? Ideas? Found a bug?
-
-- **Email**: thattimelessman@gmail.com
-- **Instagram**: [@thattimelessman](https://instagram.com/thattimelessman)
-- **GitHub Issues**: [Report a bug](https://github.com/thattimelessman/raktjaal/issues)
-
----
-
-**Made for the people who show up when someone else needs blood.**
