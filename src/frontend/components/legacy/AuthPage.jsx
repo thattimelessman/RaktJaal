@@ -986,11 +986,12 @@ export default function AuthPage({ initialMode = "login" }) {
   const [mode, setMode] = useState(initialMode);
 
   return (
-    <div className="min-h-dvh flex items-center justify-center p-4 md:p-8" style={{ background: C.cream }}>
+        <div className="min-h-dvh w-full lg:flex lg:items-center lg:justify-center lg:p-8" style={{ background: C.cream }}>
       <style dangerouslySetInnerHTML={{ __html: FONT_IMPORT }} />
 
       <div
-        className="relative w-full max-w-6xl rounded-[2.5rem] overflow-hidden flex items-center justify-center py-8 px-4 md:py-12 md:px-16 lg:min-h-[700px]" 
+        className="relative w-full lg:max-w-6xl overflow-hidden flex flex-col items-center justify-center pt-32 pb-8 px-4 md:pt-36 md:pb-12 md:px-16 lg:py-12 lg:rounded-[2.5rem] lg:min-h-[700px]"
+
         style={{ background: C.stage }}
       >
         <div className="absolute top-8 left-8 z-30 flex flex-col items-start">
@@ -1076,7 +1077,7 @@ style={{
           </div>
         </div>
 
-        <p className="absolute bottom-6 left-1/2 -translate-x-1/2 text-xs text-center z-10" style={{ color: C.sub, fontFamily: FB }}>
+        <p className="mt-6 lg:mt-0 lg:absolute lg:bottom-6 lg:left-1/2 lg:-translate-x-1/2 text-xs text-center z-10" style={{ color: C.sub, fontFamily: FB }}>
           A student prototype, not yet a registered product.
         </p>
       </div>
