@@ -15,7 +15,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body className="min-h-screen bg-gray-50 font-sans antialiased">
+      <body className="min-h-dvh bg-gray-50 font-sans antialiased">
         <AuthProvider>
           <SiteChrome>{children}</SiteChrome>
         </AuthProvider>
