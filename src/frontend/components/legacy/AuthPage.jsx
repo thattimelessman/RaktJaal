@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useState, useMemo, useEffect } from "react";
 import Link from "next/link";
@@ -986,12 +986,12 @@ export default function AuthPage({ initialMode = "login" }) {
   const [mode, setMode] = useState(initialMode);
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 md:p-8" style={{ background: C.cream }}>
+    <div className="min-h-dvh flex items-center justify-center p-4 md:p-8" style={{ background: C.cream }}>
       <style dangerouslySetInnerHTML={{ __html: FONT_IMPORT }} />
 
       <div
-        className="relative w-full max-w-6xl rounded-[2.5rem] overflow-hidden flex items-center justify-center py-12 px-6 md:px-16"
-        style={{ background: C.stage, minHeight: 700 }}
+        className="relative w-full max-w-6xl rounded-[2.5rem] overflow-hidden flex items-center justify-center py-8 px-4 md:py-12 md:px-16 lg:min-h-[700px]" 
+        style={{ background: C.stage }}
       >
         <div className="absolute top-8 left-8 z-30 flex flex-col items-start">
           <Link href="/" className="inline-flex items-center gap-2 relative z-10">
@@ -1041,9 +1041,9 @@ export default function AuthPage({ initialMode = "login" }) {
 
         <div
           key={mode}
-          className="relative z-10 w-full max-w-sm rounded-[2rem] bg-white flex flex-col hide-scroll"
-          style={{
-            height: "660px",
+          className="relative z-10 w-full max-w-sm rounded-[2rem] bg-white flex flex-col hide-scroll max-h-[90dvh] lg:h-[660px]"
+style={{
+            
             boxShadow: "0 30px 60px -25px rgba(20,17,15,0.22)",
             animation: "cardIn 0.4s cubic-bezier(.22,.61,.36,1)",
           }}
