@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -70,6 +70,7 @@ const FONT_IMPORT = `
 }
 .hide-scroll { -ms-overflow-style: none; scrollbar-width: none; }
 .hide-scroll::-webkit-scrollbar { display: none; }
+.custom-date::-webkit-calendar-picker-indicator { display: none; }
 `;
 
 /* Real, common inbox providers — extend this list if you need more. */
@@ -821,6 +822,7 @@ function AddressEditor({ value, onSave, onCancel }) {
 
 function RegisterForm({ onSwitch }) {
   const router = useRouter();
+  const dobRef = useRef(null);
   const [form, setForm] = useState({ 
     name: "", 
     dob: "", 
@@ -882,24 +884,35 @@ function RegisterForm({ onSwitch }) {
 
       <div className="flex flex-col gap-3.5">
         <Field icon={User} required value={form.name} onChange={update("name")} placeholder="Full name" />
-        <div className="relative">
-          <div className="absolute inset-y-0 left-0 pl-5 flex items-center pointer-events-none">
-            <CalendarDays size={17} color={C.sub} />
-          </div>
+
+        <div
+          className="relative flex items-center gap-3 rounded-full px-5 py-3.5 transition-all duration-200"
+          style={{ background: C.field, border: "1.5px solid transparent" }}
+        >
+          <span className="text-sm font-medium shrink-0" style={{ color: `${C.sub}CC`, fontFamily: FB }}>
+            DOB
+          </span>
           <input
+            ref={dobRef}
             type="date"
             name="dob"
             value={form.dob || ""}
             onChange={update("dob")}
-            className="w-full pl-11 pr-5 py-3.5 rounded-full text-sm outline-none transition-colors"
-            style={{
-              backgroundColor: C.field,
-              border: "1.5px solid transparent",
-              color: form.dob ? C.ink : "#A1A1AA",
-              fontFamily: FB
-            }}
+            max={new Date().toISOString().split("T")[0]}
+            className="custom-date w-full bg-transparent text-sm outline-none"
+            style={{ fontFamily: FB, color: form.dob ? C.ink : "#A1A1AA" }}
           />
+          <button
+            type="button"
+            onClick={() => dobRef.current?.showPicker?.()}
+            className="shrink-0"
+            style={{ color: C.sub, lineHeight: 0 }}
+            aria-label="Open date picker"
+          >
+            <CalendarDays size={17} />
+          </button>
         </div>
+
         <Field
           icon={Mail}
           type="email"
@@ -924,12 +937,12 @@ function RegisterForm({ onSwitch }) {
         ) : (
           <div onClick={() => setAddressExpanded(true)} style={{ cursor: "pointer" }}>
             <div className="pointer-events-none">
-              <Field 
-                icon={MapPin} 
-                required 
-                readOnly 
-                value={addressIsComplete(form.address) ? formatAddress(form.address) : ""} 
-                placeholder="Address" 
+              <Field
+                icon={MapPin}
+                required
+                readOnly
+                value={addressIsComplete(form.address) ? formatAddress(form.address) : ""}
+                placeholder="Address"
               />
             </div>
           </div>
