@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useState, useMemo, useEffect, useRef } from "react";
 import Link from "next/link";
@@ -18,7 +18,9 @@ import {
   CalendarDays,
   Loader2
 } from "lucide-react";
-import { signInWithEmail, signInWithGoogle, signUpWithEmail, resetPassword } from "@/backend/lib/auth";
+import { signInWithEmail, signInWithGoogle, signUpWithEmail, resetPassword, sendEmailOtp, verifyEmailOtpCode, signOutUser } from "@/backend/lib/auth";
+import { reload } from "firebase/auth";
+import { auth } from "@/backend/lib/firebase";
 import { createUserProfile, ensureUserProfile } from "@/backend/lib/userProfile";
 
 const C = {
@@ -70,7 +72,9 @@ const FONT_IMPORT = `
 }
 .hide-scroll { -ms-overflow-style: none; scrollbar-width: none; }
 .hide-scroll::-webkit-scrollbar { display: none; }
-.custom-date::-webkit-calendar-picker-indicator { display: none; }
+.custom-date::-webkit-calendar-picker-indicator {
+  display: none;
+}
 `;
 
 /* Real, common inbox providers — extend this list if you need more. */
@@ -823,6 +827,11 @@ function AddressEditor({ value, onSave, onCancel }) {
 function RegisterForm({ onSwitch }) {
   const router = useRouter();
   const dobRef = useRef(null);
+  const [verificationPending, setVerificationPending] = useState(false);
+  const [verificationEmail, setVerificationEmail] = useState("");
+  const [verificationStatus, setVerificationStatus] = useState("");
+  const [checkingVerification, setCheckingVerification] = useState(false);
+  const [verificationOtp, setVerificationOtp] = useState("");
   const [form, setForm] = useState({ 
     name: "", 
     dob: "", 
@@ -857,7 +866,28 @@ function RegisterForm({ onSwitch }) {
     setSubmitting(true);
     try {
       const cred = await signUpWithEmail(form.name, form.email, form.password);
-      await createUserProfile(cred.user.uid, {
+      setVerificationEmail(cred.user.email || form.email);
+      await sendEmailOtp("registration");
+      setVerificationPending(true);
+      setVerificationStatus("We sent a 6-digit OTP to your email. Enter it below to finish registration.");
+    } catch (err) {
+      setAuthError(err?.message || "Couldn't create your account. Please try again.");
+      setSubmitting(false);
+    }
+  };
+
+  const checkEmailVerification = async () => {
+    if (!auth.currentUser) return;
+    if (!/^\d{6}$/.test(verificationOtp)) {
+      setVerificationStatus("Enter the 6-digit OTP from your email.");
+      return;
+    }
+    setCheckingVerification(true);
+    setVerificationStatus("");
+    try {
+      await verifyEmailOtpCode(verificationOtp, "registration");
+      await reload(auth.currentUser);
+      await createUserProfile(auth.currentUser.uid, {
         name: form.name,
         dob: form.dob,
         email: form.email,
@@ -866,10 +896,71 @@ function RegisterForm({ onSwitch }) {
       });
       router.push("/action");
     } catch (err) {
-      setAuthError(err?.message || "Couldn't create your account. Please try again.");
-      setSubmitting(false);
+      setVerificationStatus(err?.message || "Could not verify the OTP.");
+    } finally {
+      setCheckingVerification(false);
     }
   };
+
+  const resendVerification = async () => {
+    try {
+      await sendEmailOtp("registration");
+      setVerificationStatus("A new 6-digit OTP was sent to your email.");
+    } catch (err) {
+      setVerificationStatus(err?.message || "Could not resend the OTP.");
+    }
+  };
+
+  const cancelVerification = async () => {
+    await signOutUser();
+    setVerificationPending(false);
+    setVerificationEmail("");
+    setVerificationStatus("");
+    setVerificationOtp("");
+    setSubmitting(false);
+  };
+
+  if (verificationPending) {
+    return (
+      <div className="w-full max-w-sm mx-auto" style={{ animation: "fadeUp 0.3s ease" }}>
+        <div className="text-center">
+          <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-full bg-red-50 text-2xl">✉️</div>
+          <h1 className="text-3xl font-bold tracking-tight mb-2" style={{ color: C.ink, fontFamily: FD }}>Verify your email</h1>
+          <p className="text-sm leading-6" style={{ color: C.sub, fontFamily: FB }}>
+            Your registration is not complete yet. Verify <strong>{verificationEmail}</strong> using the 6-digit OTP we just sent.
+          </p>
+        </div>
+
+        {verificationStatus && (
+          <p className="mt-4 rounded-2xl p-3 text-xs text-center" style={{ background: C.field, color: C.ink, fontFamily: FB }}>
+            {verificationStatus}
+          </p>
+        )}
+
+        <div className="mt-6 flex flex-col gap-3">
+          <input
+            value={verificationOtp}
+            onChange={(e) => setVerificationOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            maxLength={6}
+            placeholder="Enter 6-digit OTP"
+            className="w-full py-3.5 px-5 rounded-full text-center text-lg tracking-[0.35em] outline-none"
+            style={{ background: C.field, color: C.ink, fontFamily: "monospace", border: `1.5px solid ${C.ink}12` }}
+          />
+          <button type="button" onClick={checkEmailVerification} disabled={checkingVerification || verificationOtp.length !== 6} className="w-full py-3.5 rounded-full text-white text-sm font-semibold disabled:opacity-60" style={{ background: C.brick, fontFamily: FB }}>
+            {checkingVerification ? "Verifying..." : "Verify OTP"}
+          </button>
+          <button type="button" onClick={resendVerification} className="w-full py-3.5 rounded-full text-sm font-semibold" style={{ border: `1.5px solid ${C.ink}1A`, color: C.ink, fontFamily: FB }}>
+            Resend OTP
+          </button>
+          <button type="button" onClick={cancelVerification} className="py-2 text-sm" style={{ color: C.sub, fontFamily: FB }}>
+            Cancel registration
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <form
@@ -884,35 +975,36 @@ function RegisterForm({ onSwitch }) {
 
       <div className="flex flex-col gap-3.5">
         <Field icon={User} required value={form.name} onChange={update("name")} placeholder="Full name" />
-
-        <div
-          className="relative flex items-center gap-3 rounded-full px-5 py-3.5 transition-all duration-200"
-          style={{ background: C.field, border: "1.5px solid transparent" }}
-        >
-          <span className="text-sm font-medium shrink-0" style={{ color: `${C.sub}CC`, fontFamily: FB }}>
+        <div className="relative">
+          <div
+            className="relative flex items-center gap-3 rounded-full px-5 py-3.5 transition-all duration-200"
+            style={{ background: C.field, border: "1.5px solid transparent" }}
+          >
+            <span className="text-sm font-medium shrink-0" style={{ color: `${C.sub}CC`, fontFamily: FB }}>
             DOB
           </span>
-          <input
-            ref={dobRef}
-            type="date"
-            name="dob"
-            value={form.dob || ""}
-            onChange={update("dob")}
-            max={new Date().toISOString().split("T")[0]}
-            className="custom-date w-full bg-transparent text-sm outline-none"
-            style={{ fontFamily: FB, color: form.dob ? C.ink : "#A1A1AA" }}
-          />
-          <button
-            type="button"
-            onClick={() => dobRef.current?.showPicker?.()}
-            className="shrink-0"
-            style={{ color: C.sub, lineHeight: 0 }}
-            aria-label="Open date picker"
-          >
-            <CalendarDays size={17} />
-          </button>
+            <input
+              ref={dobRef}
+              type="date"
+              name="dob"
+              value={form.dob || ""}
+              onChange={update("dob")}
+              max={new Date().toISOString().split("T")[0]}
+              className="custom-date w-full bg-transparent text-sm outline-none"
+              style={{ fontFamily: FB, color: form.dob ? C.ink : "#A1A1AA" }}
+            />
+            <button
+              type="button"
+              onClick={() => dobRef.current?.showPicker?.()}
+              className="shrink-0"
+              style={{ color: C.sub, lineHeight: 0 }}
+              aria-label="Open date picker"
+            >
+              <CalendarDays size={17} />
+            </button>
+          </div>
         </div>
-
+        
         <Field
           icon={Mail}
           type="email"

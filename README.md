@@ -240,3 +240,20 @@ collection for notification dispatch, and one for inbox messaging.
 - **GitHub**: [@thattimelessman](https://github.com/thattimelessman)
 - **Instagram**: [@thattimelessman](https://instagram.com/thattimelessman)
 - **GitHub Issues**: [Report a bug](https://github.com/thattimelessman/RaktJaal/issues)
+
+## Email OTP setup
+
+This version uses a real 6-digit email OTP for account registration and account deletion.
+Email delivery is handled by Resend, while Firebase Admin verifies the signed-in user and records OTP state server-side.
+
+Add these server-only variables to `.env.local`:
+
+- `FIREBASE_ADMIN_PROJECT_ID`
+- `FIREBASE_ADMIN_CLIENT_EMAIL`
+- `FIREBASE_ADMIN_PRIVATE_KEY`
+- `RESEND_API_KEY`
+- `RESEND_FROM_EMAIL`
+
+Do not prefix these server secrets with `NEXT_PUBLIC_`. The `FIREBASE_ADMIN_PRIVATE_KEY` value may contain `\n` line breaks.
+
+Install the added server dependency with `npm install`, then run `npm run dev`.

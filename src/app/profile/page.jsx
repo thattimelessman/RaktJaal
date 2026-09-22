@@ -3,8 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/frontend/hooks/useAuth";
-import { signOutUser, deleteCurrentUser } from "@/backend/lib/auth";
-import { getUserProfile, updateUserProfile, deleteUserProfile } from "@/backend/lib/userProfile";
+import { signOutUser, sendEmailOtp, deleteAccountWithEmailOtp } from "@/backend/lib/auth";
+import { getUserProfile, updateUserProfile } from "@/backend/lib/userProfile";
 import {
   Droplet,
   Home,
@@ -1057,65 +1057,79 @@ function AddressEditor({ value, onSave, onCancel }) {
 }
 
 /* ---------------------------------------------------------------
-   Local one-time-code panels
-   ---------------------------------------------------------------
-   Three flows in this file now use the same honest pattern: RaktJaal has
-   no backend and no way to actually send an SMS or email, so instead of
-   pretending to, each panel generates a 6-digit code, shows it directly
-   on screen, and requires the person to type it back before the action
-   completes. It's a deliberate confirmation speed bump, not real
-   out-of-band verification — the copy says so plainly in each case.
------------------------------------------------------------------- */
+   Email OTP panels
+   --------------------------------------------------------------- */
 
-/**
- * Account-deletion confirmation using a locally-generated 6-digit code.
- */
 function CodeConfirmDelete({ onConfirm, onCancel }) {
-  const [code] = useState(() => String(Math.floor(100000 + Math.random() * 900000)));
-  const [input, setInput] = useState("");
-  const matches = input.trim() === code;
+  const [code, setCode] = useState("");
+  const [status, setStatus] = useState("Sending a 6-digit OTP to your account email…");
+  const [sending, setSending] = useState(true);
+  const [confirming, setConfirming] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    sendEmailOtp("delete")
+      .then(() => { if (alive) setStatus("We sent a 6-digit OTP to your email. Enter it below to permanently delete your account."); })
+      .catch((err) => { if (alive) setStatus(err?.message || "Could not send the deletion OTP."); })
+      .finally(() => { if (alive) setSending(false); });
+    return () => { alive = false; };
+  }, []);
+
+  const confirm = async () => {
+    if (!/^\d{6}$/.test(code)) {
+      setStatus("Enter the 6-digit OTP from your email.");
+      return;
+    }
+    setConfirming(true);
+    try {
+      await deleteAccountWithEmailOtp(code);
+      await onConfirm();
+    } catch (err) {
+      setStatus(err?.message || "Could not delete the account.");
+    } finally {
+      setConfirming(false);
+    }
+  };
+
+  const resend = async () => {
+    setSending(true);
+    try {
+      await sendEmailOtp("delete");
+      setStatus("A new deletion OTP was sent to your email.");
+    } catch (err) {
+      setStatus(err?.message || "Could not resend the deletion OTP.");
+    } finally {
+      setSending(false);
+    }
+  };
 
   return (
     <div className="flex flex-col gap-3">
       <div>
         <p className="text-sm" style={{ color: C.ink, fontFamily: F, fontWeight: 600 }}>
-          Type this code to confirm deletion
+          Delete account with email OTP
         </p>
         <p className="text-[12px] mt-1 max-w-sm" style={{ color: C.sub, fontFamily: F }}>
-          RaktJaal has no email service yet, so this can't be a real emailed OTP — it's a local confirmation code shown right here, meant only to stop an accidental click.
+          A one-time code is sent to your account email. Your account is deleted only after the correct OTP is entered.
         </p>
       </div>
-      <div className="flex items-center gap-3">
-        <span
-          className="px-4 py-2 rounded-lg text-lg tracking-[0.3em] font-bold"
-          style={{ background: C.chip, color: C.ink, fontFamily: "monospace" }}
-        >
-          {code}
-        </span>
-      </div>
+      <p className="text-xs" style={{ color: C.sub, fontFamily: F }}>{status}</p>
       <input
-        value={input}
-        onChange={(e) => setInput(e.target.value.replace(/\D/g, "").slice(0, 6))}
+        value={code}
+        onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
         inputMode="numeric"
-        placeholder="Enter the 6-digit code above"
-        className="w-full max-w-xs text-sm bg-transparent outline-none border-b pb-1"
-        style={{ color: C.ink, fontFamily: F, fontWeight: 500, borderColor: C.ink }}
+        autoComplete="one-time-code"
+        maxLength={6}
+        placeholder="Enter 6-digit OTP"
+        disabled={sending || confirming}
+        className="w-full max-w-xs text-center text-lg tracking-[0.3em] px-4 py-2 rounded-lg outline-none"
+        style={{ background: C.chip, color: C.ink, fontFamily: "monospace" }}
       />
-      <div className="flex items-center gap-2">
-        <button
-          onClick={onCancel}
-          className="text-xs px-3.5 py-2 rounded-full transition-colors hover:bg-[#F4F4F5]"
-          style={{ border: `1px solid ${C.border}`, color: C.ink, fontFamily: F, fontWeight: 600 }}
-        >
-          Cancel
-        </button>
-        <button
-          onClick={onConfirm}
-          disabled={!matches}
-          className="text-xs px-3.5 py-2 rounded-full text-white transition-opacity"
-          style={{ background: C.brickDark, fontFamily: F, fontWeight: 600, opacity: matches ? 1 : 0.4 }}
-        >
-          Confirm delete
+      <div className="flex items-center gap-2 flex-wrap">
+        <button onClick={onCancel} disabled={confirming} className="text-xs px-3.5 py-2 rounded-full transition-colors hover:bg-[#F4F4F5]" style={{ border: `1px solid ${C.border}`, color: C.ink, fontFamily: F, fontWeight: 600 }}>Cancel</button>
+        <button onClick={resend} disabled={sending || confirming} className="text-xs px-3.5 py-2 rounded-full transition-colors hover:bg-[#F4F4F5]" style={{ border: `1px solid ${C.border}`, color: C.ink, fontFamily: F, fontWeight: 600 }}>Resend OTP</button>
+        <button onClick={confirm} disabled={code.length !== 6 || confirming} className="text-xs px-3.5 py-2 rounded-full text-white transition-opacity" style={{ background: C.brickDark, fontFamily: F, fontWeight: 600, opacity: code.length === 6 && !confirming ? 1 : 0.4 }}>
+          {confirming ? "Deleting…" : "Confirm delete"}
         </button>
       </div>
     </div>
@@ -1181,64 +1195,6 @@ function TwoFactorSetup({ onVerified, onCancel }) {
   );
 }
 
-/**
- * Phone number OTP verification. Shown right after saving a new phone
- * number in the Contact details row — the number isn't actually stored as
- * the profile's phone until this code is confirmed. Same honesty pattern
- * as above: local code, shown on screen, no real SMS. Once a given number
- * has been verified this way, ProfilePage remembers it (`verifiedPhone`)
- * so re-saving the *same* number later skips straight through — this step
- * only fires for a number that hasn't been verified before.
- */
-function PhoneOtpVerify({ phone, onVerified, onCancel }) {
-  const [code] = useState(() => String(Math.floor(100000 + Math.random() * 900000)));
-  const [input, setInput] = useState("");
-  const matches = input.trim() === code;
-
-  return (
-    <div className="flex flex-col gap-3">
-      <div>
-        <p className="text-sm" style={{ color: C.ink, fontFamily: F, fontWeight: 600 }}>
-          Enter the code to verify {phone}
-        </p>
-        <p className="text-[12px] mt-1 max-w-sm" style={{ color: C.sub, fontFamily: F }}>
-          RaktJaal has no SMS service yet, so this can't be a real text message — it's a local confirmation code shown right here. This is a one-time check for this number; once verified you won't be asked again unless you change it.
-        </p>
-      </div>
-      <span
-        className="px-4 py-2 rounded-lg text-lg tracking-[0.3em] font-bold w-fit"
-        style={{ background: C.chip, color: C.ink, fontFamily: "monospace" }}
-      >
-        {code}
-      </span>
-      <input
-        value={input}
-        onChange={(e) => setInput(e.target.value.replace(/\D/g, "").slice(0, 6))}
-        inputMode="numeric"
-        placeholder="Enter the 6-digit code above"
-        className="w-full max-w-xs text-sm bg-transparent outline-none border-b pb-1"
-        style={{ color: C.ink, fontFamily: F, fontWeight: 500, borderColor: C.ink }}
-      />
-      <div className="flex items-center gap-2">
-        <button
-          onClick={onCancel}
-          className="text-xs px-3.5 py-2 rounded-full transition-colors hover:bg-[#F4F4F5]"
-          style={{ border: `1px solid ${C.border}`, color: C.ink, fontFamily: F, fontWeight: 600 }}
-        >
-          Cancel
-        </button>
-        <button
-          onClick={onVerified}
-          disabled={!matches}
-          className="text-xs px-3.5 py-2 rounded-full text-white transition-opacity"
-          style={{ background: C.ink, fontFamily: F, fontWeight: 600, opacity: matches ? 1 : 0.4 }}
-        >
-          Verify number
-        </button>
-      </div>
-    </div>
-  );
-}
 
 /* ---------------------------------------------------------------
    Donation history
@@ -1762,7 +1718,6 @@ export default function ProfilePage() {
   const [editingKey, setEditingKey] = useState(null); // "name" | "email" | "phone" | "address" | "addEmail"
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [settingUpTwoFactor, setSettingUpTwoFactor] = useState(false);
-  const [pendingPhone, setPendingPhone] = useState(null); // phone number awaiting OTP confirmation
   const device = useMemo(() => readDeviceInfo(), []);
   const [sessionStart] = useState(() => new Date());
 
@@ -1816,17 +1771,6 @@ export default function ProfilePage() {
     });
   };
 
-  // Same as updateField but for saving several fields together in one go —
-  // used by phone verification, which needs to set phone + phoneVerified +
-  // verifiedPhone atomically rather than as three separate renders.
-  const updateFields = (patch) => {
-    const updated = { ...user, ...patch };
-    setUser(updated);
-    flashSaved();
-    updateUserProfile(authUser.uid, patch).catch(() => {
-      /* best-effort — the optimistic local update above already reflects the change */
-    });
-  };
 
   const saveAddress = (addr) => {
     updateField("address", addr);
@@ -1866,15 +1810,6 @@ export default function ProfilePage() {
   };
 
   const handleDeleteAccount = async () => {
-    try {
-      await deleteUserProfile(authUser.uid);
-      await deleteCurrentUser();
-    } catch (err) {
-      // If Firebase requires a fresh login to delete the auth account, at
-      // least the profile doc above is already gone; sign out either way
-      // so the person isn't stuck looking at a half-deleted account.
-      console.error(err);
-    }
     await signOutUser();
     router.push("/register");
   };
@@ -1884,7 +1819,6 @@ export default function ProfilePage() {
     ? user.name.trim().split(/\s+/).slice(0, 2).map((p) => p[0]?.toUpperCase()).join("")
     : "?";
   const secondaryEmails = Array.isArray(user.secondaryEmails) ? user.secondaryEmails : [];
-  const phoneIsVerified = Boolean(user.phone && user.phoneVerified && user.verifiedPhone === user.phone);
 
   const NAV = [
     { key: "profile", label: "Profile", icon: User },
@@ -2165,40 +2099,17 @@ export default function ProfilePage() {
                 <div className="flex flex-col gap-3.5">
                   <div>
                     {editingKey === "phone" ? (
-                      pendingPhone ? (
-                        <PhoneOtpVerify
-                          phone={pendingPhone}
-                          onVerified={() => {
-                            updateFields({ phone: pendingPhone, phoneVerified: true, verifiedPhone: pendingPhone });
-                            setPendingPhone(null);
-                            setEditingKey(null);
-                          }}
-                          onCancel={() => {
-                            setPendingPhone(null);
-                            setEditingKey(null);
-                          }}
-                        />
-                      ) : (
-                        <InlineEditor
-                          value={user.phone}
-                          type="tel"
-                          placeholder="+91 98765 43210"
-                          validate={(v) => validatePhone(v)}
-                          onSave={(v) => {
-                            // Already verified this exact number before —
-                            // this is the "one-time" part: skip OTP entirely.
-                            if (v === user.verifiedPhone && user.phoneVerified) {
-                              updateField("phone", v);
-                              setEditingKey(null);
-                              return;
-                            }
-                            // New or previously-unverified number — hold off
-                            // on saving it as the real phone until OTP passes.
-                            setPendingPhone(v);
-                          }}
-                          onCancel={() => setEditingKey(null)}
-                        />
-                      )
+                      <InlineEditor
+                        value={user.phone}
+                        type="tel"
+                        placeholder="+91 98765 43210"
+                        validate={(v) => validatePhone(v)}
+                        onSave={(v) => {
+                          updateField("phone", v);
+                          setEditingKey(null);
+                        }}
+                        onCancel={() => setEditingKey(null)}
+                      />
                     ) : (
                       <RowItem
                         left={
@@ -2209,11 +2120,7 @@ export default function ProfilePage() {
                                 <span className="text-sm" style={{ color: C.ink, fontFamily: F, fontWeight: 500 }}>
                                   {user.phone}
                                 </span>
-                                {phoneIsVerified && (
-                                  <Tooltip label="Phone verified" sub="Confirmed via one-time code">
-                                    <ShieldCheck size={13} color={C.brick} className="cursor-default" />
-                                  </Tooltip>
-                                )}
+
                               </div>
                             ) : (
                               <span className="text-sm italic" style={{ color: C.sub, fontFamily: F }}>

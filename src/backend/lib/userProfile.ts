@@ -36,8 +36,6 @@ export interface UserProfile {
     country?: string;
   };
   phone?: string;
-  phoneVerified?: boolean;
-  verifiedPhone?: string;
   secondaryEmails?: string[];
   profilePhoto?: string | null;
   createdAt?: number;

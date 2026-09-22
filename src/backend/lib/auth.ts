@@ -5,7 +5,6 @@ import {
   signOut,
   sendPasswordResetEmail,
   updateProfile,
-  deleteUser,
   type UserCredential,
 } from "firebase/auth";
 import { auth, googleProvider } from "@/backend/lib/firebase";
@@ -58,10 +57,53 @@ export async function signInWithEmail(
   password: string
 ): Promise<UserCredential> {
   try {
-    return await signInWithEmailAndPassword(auth, email, password);
+    const cred = await signInWithEmailAndPassword(auth, email, password);
+    if (!cred.user.emailVerified) {
+      await sendEmailOtp("registration");
+      await signOut(auth);
+      throw new Error("Please verify your email with the OTP we sent before signing in.");
+    }
+    return cred;
   } catch (err) {
+    if (err instanceof Error && !(err as { code?: string }).code) throw err;
     throw new Error(friendlyAuthError(err));
   }
+}
+
+export async function sendEmailOtp(purpose: "registration" | "delete"): Promise<void> {
+  if (!auth.currentUser) throw new Error("No signed-in account found.");
+  const token = await auth.currentUser.getIdToken(true);
+  const response = await fetch("/api/email-otp/send", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ purpose }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || "Could not send the email OTP.");
+}
+
+export async function verifyEmailOtpCode(code: string, purpose: "registration" | "delete"): Promise<void> {
+  if (!auth.currentUser) throw new Error("No signed-in account found.");
+  const token = await auth.currentUser.getIdToken(true);
+  const response = await fetch("/api/email-otp/verify", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ purpose, code }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || "Could not verify the email OTP.");
+}
+
+export async function deleteAccountWithEmailOtp(code: string): Promise<void> {
+  if (!auth.currentUser) throw new Error("No signed-in account found.");
+  const token = await auth.currentUser.getIdToken(true);
+  const response = await fetch("/api/account/delete", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ code }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || "Could not delete the account.");
 }
 
 export async function signInWithGoogle(): Promise<UserCredential> {
@@ -84,23 +126,3 @@ export async function signOutUser(): Promise<void> {
   await signOut(auth);
 }
 
-/**
- * Deletes the currently signed-in Firebase Auth account.
- * Firebase requires a "recent" login for this; if the session is stale it
- * throws auth/requires-recent-login, which callers should surface as
- * "please sign in again, then retry deleting your account."
- */
-export async function deleteCurrentUser(): Promise<void> {
-  if (!auth.currentUser) throw new Error("No signed-in user to delete.");
-  try {
-    await deleteUser(auth.currentUser);
-  } catch (err) {
-    const code = (err as { code?: string })?.code ?? "";
-    if (code === "auth/requires-recent-login") {
-      throw new Error(
-        "For your security, please sign out and sign back in, then try deleting your account again."
-      );
-    }
-    throw new Error(friendlyAuthError(err));
-  }
-}
