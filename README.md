@@ -8,10 +8,10 @@ a direct, location-aware match: post a request or register as a donor, and
 the app finds compatible people within a real radius in seconds — no group
 forwarding, no login friction for the person who's actually in a hospital.
 
-This repo implements **Phase 1 (core flow)** end-to-end — email/password and
-Google sign-in, a real Firestore-backed donor directory, and geohash-based
-proximity matching — scaffolded so Phases 2–5 (below) are additions, not
-rewrites.
+This repo implements **Phase 1 (core flow)** end-to-end — email/password
+(with mandatory email-OTP verification) and Google sign-in, a real
+Firestore-backed donor directory, and geohash-based proximity matching —
+scaffolded so Phases 2–5 (below) are additions, not rewrites.
 
 ---
 
@@ -19,9 +19,11 @@ rewrites.
 
 - **Auth** — `/login` and `/register` (both routed through the shared
   `legacy/AuthPage.jsx`): email/password (Firebase Auth) plus a "Continue
-  with Google" button (`signInWithPopup`). Either path lands the user with a
-  Firebase Auth `uid`, which is what donor and user documents are keyed by
-  in Firestore.
+  with Google" button (`signInWithPopup`). New email/password accounts must
+  verify a 6-digit email OTP before they can sign in — see
+  [Email verification & account deletion](#-email-verification--account-deletion)
+  below. Either path lands the user with a Firebase Auth `uid`, which is what
+  donor and user documents are keyed by in Firestore.
 - **Requester form** — `/request`: blood type, units, hospital, location
   (browser geolocation or manual lat/lng), urgency, and a contact number.
   No login required to post a request — matches the "no login friction"
@@ -44,12 +46,29 @@ rewrites.
 ### Authentication
 - Email/password **and** Google sign-in (`signInWithPopup`), both landing
   the user with the same kind of Firebase Auth `uid`.
+- **Mandatory email verification**: a new email/password account can't sign
+  in until it verifies a 6-digit OTP sent to its own inbox. Signing in with
+  an unverified account automatically re-sends the OTP and signs the session
+  back out with a clear message, instead of leaving it half-authenticated.
 - Friendly, mapped error messages for the Firebase Auth codes that actually
   come up in practice — wrong password, popup closed, account-exists-with-
   different-credential, weak password, too many attempts, etc.
 - Password reset via `sendPasswordResetEmail`.
-- Account deletion, with a clear prompt to re-authenticate if Firebase
-  requires a fresh login (`auth/requires-recent-login`).
+- Account deletion is itself OTP-gated (see below), with the underlying
+  Firebase user and Firestore profile removed together via a server route.
+
+### Email verification & account deletion
+- OTP codes are generated and checked **server-side**: `POST /api/email-otp/send`
+  and `POST /api/email-otp/verify` (used for registration), and
+  `POST /api/account/delete` (used for account deletion), all authenticated
+  with a Firebase ID token and backed by the Firebase Admin SDK.
+- Codes are 6 digits, SHA-256 hashed before being stored in an `emailOtps`
+  Firestore collection (never stored in plaintext), expire after 10 minutes,
+  allow at most 5 incorrect attempts, and enforce a 60-second resend
+  cooldown — all server-enforced in `backend/lib/emailOtp.ts`.
+- Email delivery goes through **Gmail SMTP via Nodemailer** — see
+  [Email OTP setup](#-email-otp-setup) below for the exact environment
+  variables required.
 
 ### Donor matching
 - **Geohash-indexed search**: donors are written with a precision-6 geohash;
@@ -89,6 +108,8 @@ rewrites.
 | Frontend | Next.js 14 (App Router) + TypeScript/JSX + Tailwind |
 | Auth | Firebase Auth — email/password + Google sign-in |
 | Database | Firebase Firestore |
+| Server / API routes | Next.js Route Handlers + Firebase Admin SDK (`firebase-admin`) |
+| Email delivery | Nodemailer over Gmail SMTP (OTP codes) |
 | Geo matching | `ngeohash` (precision-6 geohash) + haversine distance, client-side query |
 | Icons | lucide-react |
 
@@ -99,6 +120,8 @@ rewrites.
 ### Prerequisites
 - Node.js 18+ and npm
 - A Firebase project
+- A Google account with an [App Password](https://myaccount.google.com/apppasswords)
+  for sending OTP emails via Gmail SMTP (see [Email OTP setup](#-email-otp-setup))
 
 ### Setup
 
@@ -120,6 +143,13 @@ cp .env.example .env.local
 6. The Google sign-in popup requires `localhost` (dev) and your real domain
    (prod) to be listed in **Authentication → Settings → Authorized domains**.
    `localhost` is usually pre-authorized.
+7. Generate a Firebase Admin service account (Project settings → Service
+   accounts → Generate new private key) and fill in the
+   `FIREBASE_ADMIN_*` variables in `.env.local` — the OTP and account-deletion
+   API routes need this to verify ID tokens and write to Firestore as an
+   admin.
+8. Set up Gmail SMTP credentials for OTP delivery — see
+   [Email OTP setup](#-email-otp-setup) below.
 
 ```bash
 npm run dev
@@ -138,11 +168,15 @@ RaktJaal/
 │   │   ├── page.jsx                  Landing page
 │   │   ├── login/page.jsx            → legacy/AuthPage (login mode)
 │   │   ├── register/page.jsx         → legacy/AuthPage (register mode)
+│   │   ├── signup/page.jsx           Redirect shim: old /signup → /register
 │   │   ├── action/page.jsx           Post-login "Need Blood" / "Donate Blood" screen
 │   │   ├── profile/page.jsx          Account settings — profile, security, delete account
 │   │   ├── request/page.tsx          Requester form (no login required)
 │   │   ├── request/[id]/page.tsx     Match results for a submitted request
 │   │   ├── donor/signup/page.tsx     Donor profile form (auth required)
+│   │   ├── api/email-otp/send/route.ts    Generates + emails a 6-digit OTP
+│   │   ├── api/email-otp/verify/route.ts  Verifies an OTP (registration or deletion)
+│   │   ├── api/account/delete/route.ts    OTP-gated account + profile deletion
 │   │   ├── layout.tsx                Root layout — wraps app in AuthProvider + SiteChrome
 │   │   └── globals.css               Tailwind base + shared utility classes
 │   ├── frontend/
@@ -151,20 +185,22 @@ RaktJaal/
 │   │   │   ├── NavBar.tsx            Header for shared-chrome routes
 │   │   │   ├── GoogleButton.tsx      "Continue with Google" button
 │   │   │   ├── DonorCard.tsx         Donor match result card
-│   │   │   └── legacy/AuthPage.jsx   Shared login/register screen
+│   │   │   └── legacy/AuthPage.jsx   Shared login/register screen + OTP verification UI
 │   │   └── hooks/
 │   │       ├── useAuth.tsx           Auth context (current Firebase user)
 │   │       └── useGeolocation.ts     Browser Geolocation API wrapper
 │   └── backend/
 │       ├── lib/
-│       │   ├── firebase.ts           Firebase app/Firestore/Auth init
-│       │   ├── auth.ts               Email/password + Google auth helpers, friendly errors
+│       │   ├── firebase.ts           Firebase client app/Firestore/Auth init
+│       │   ├── firebaseAdmin.ts      Firebase Admin SDK init (server-only)
+│       │   ├── auth.ts               Email/password + Google auth helpers, OTP client calls, friendly errors
+│       │   ├── emailOtp.ts           Server-side OTP generation, hashing, and verification
 │       │   ├── userProfile.ts        users/{uid} profile CRUD (Firestore)
 │       │   ├── matching.ts           Geohash + haversine donor matching query
 │       │   └── geohash.ts            Geohash encode, search-cell neighbors, haversine distance
 │       └── types/index.ts            Shared types (Donor, BloodRequest, DonorMatch, ...)
 ├── firestore.rules                   Security rules for donors/, users/, requests/
-└── .env.example                      Firebase config template
+└── .env.example                      Firebase + SMTP config template
 ```
 
 ---
@@ -176,11 +212,19 @@ RaktJaal/
   or Google. `authProvider` on the donor doc records which one was used
   (`password` or `google.com`) for analytics only; it doesn't affect
   matching.
+- Email/password accounts must verify a 6-digit OTP (sent to their own
+  inbox) before they can sign in. `signInWithEmail` checks
+  `cred.user.emailVerified`, and if it's `false`, it fires off a fresh OTP,
+  signs the session back out, and surfaces a "verify your email" message
+  rather than letting an unverified session through.
 - If someone signs in with Google and later tries to sign up with the same
   email/password, Firebase throws `auth/account-exists-with-different-credential`,
   which the app surfaces as a friendly error instead of failing silently.
 - `ensureUserProfile` backfills a `users/{uid}` profile doc on first Google
   sign-in without clobbering any existing data.
+- Account deletion also requires a fresh OTP: `/api/account/delete` verifies
+  the code server-side, then deletes the `users/{uid}` Firestore doc and the
+  Firebase Auth user in the same request.
 
 ---
 
@@ -193,6 +237,9 @@ hospital accounts yet, matching the "no login friction" hospital-view goal):
   client-side — the app UI simply never displays the `phone` field outside
   the donor's own session.
 - Blood requests are open-read/open-create with no auth gate.
+- The `emailOtps` collection has no client-facing Firestore rule because it's
+  only ever touched by the Admin SDK from the API routes — OTP hashes are
+  never exposed to, or writable by, the browser.
 
 Before a public launch, move `phone` into a subcollection or a Cloud
 Function–mediated reveal so this is enforced at the database layer, not just
@@ -200,12 +247,41 @@ hidden in the UI.
 
 ---
 
+## 📧 Email OTP setup
+
+Account registration and account deletion both require a real 6-digit email
+OTP. Codes are generated, hashed, and checked server-side in
+`backend/lib/emailOtp.ts`; the Firebase Admin SDK verifies the signed-in
+user before an OTP is issued or checked. Delivery is handled by
+**Nodemailer over Gmail SMTP**.
+
+Add these server-only variables to `.env.local`:
+
+- `FIREBASE_ADMIN_PROJECT_ID`
+- `FIREBASE_ADMIN_CLIENT_EMAIL`
+- `FIREBASE_ADMIN_PRIVATE_KEY`
+- `SMTP_USER` — the Gmail address OTP emails are sent from
+- `SMTP_PASSWORD` — a Gmail [App Password](https://myaccount.google.com/apppasswords)
+  (not your regular account password — Gmail requires 2-Step Verification
+  to be enabled first)
+- `SMTP_HOST` — optional, defaults to `smtp.gmail.com`
+- `SMTP_PORT` — optional, defaults to `465`
+
+Do not prefix these server secrets with `NEXT_PUBLIC_`. The
+`FIREBASE_ADMIN_PRIVATE_KEY` value may contain `\n` line breaks.
+
+Install the added server dependencies with `npm install`, then run
+`npm run dev`.
+
+---
+
 ## 🗺️ Roadmap
 
 **Phase 1 — Core flow**
-- Email/password + Google auth, requester form, donor signup, and static
-  geohash + haversine matching — see [What's Built](#-whats-built--phase-1-core-flow)
-  above for the full breakdown.
+- Email/password + Google auth (with OTP-verified email), requester form,
+  donor signup, and static geohash + haversine matching — see
+  [What's Built](#-whats-built--phase-1-core-flow) above for the full
+  breakdown.
 
 **Phase 2 — Real-time**
 - Swap `getDocs` in `matching.ts` for `onSnapshot` so the donor list updates
@@ -235,25 +311,16 @@ collection for notification dispatch, and one for inbox messaging.
 
 ---
 
+## 👥 Team
+
+Built at **PSIT Kanpur, Dept. of Data Science** as a mini project
+(2026–27) — Team CS-DS-3A-05.
+
+---
+
 ## 📧 Contact
 
 - **GitHub**: [@thattimelessman](https://github.com/thattimelessman)
 - **Instagram**: [@thattimelessman](https://instagram.com/thattimelessman)
 - **GitHub Issues**: [Report a bug](https://github.com/thattimelessman/RaktJaal/issues)
-
-## Email OTP setup
-
-This version uses a real 6-digit email OTP for account registration and account deletion.
-Email delivery is handled by Resend, while Firebase Admin verifies the signed-in user and records OTP state server-side.
-
-Add these server-only variables to `.env.local`:
-
-- `FIREBASE_ADMIN_PROJECT_ID`
-- `FIREBASE_ADMIN_CLIENT_EMAIL`
-- `FIREBASE_ADMIN_PRIVATE_KEY`
-- `RESEND_API_KEY`
-- `RESEND_FROM_EMAIL`
-
-Do not prefix these server secrets with `NEXT_PUBLIC_`. The `FIREBASE_ADMIN_PRIVATE_KEY` value may contain `\n` line breaks.
-
-Install the added server dependency with `npm install`, then run `npm run dev`.
+- **Live demo**: [raktjaal.vercel.app](https://raktjaal.vercel.app/)
