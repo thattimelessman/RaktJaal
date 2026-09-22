@@ -4,13 +4,13 @@ import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { addDoc, collection } from "firebase/firestore";
 import { db } from "@/backend/lib/firebase";
-import { useGeolocation } from "@/frontend/hooks/useGeolocation";
+import LocationMap from "@/frontend/components/LocationMap";
 import { encodeGeohash } from "@/backend/lib/geohash";
 import { BLOOD_TYPES, type BloodType, type Urgency } from "@/backend/types";
 
 export default function RequestPage() {
   const router = useRouter();
-  const { coords, loading: locLoading, error: locError, request } = useGeolocation();
+  const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
 
   const [bloodType, setBloodType] = useState<BloodType>("O+");
   const [units, setUnits] = useState(1);
@@ -182,41 +182,33 @@ export default function RequestPage() {
 
         <div>
           <label className="label">Location</label>
-          {coords ? (
-            <p className="rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
-              Location captured ({coords.lat.toFixed(4)}, {coords.lng.toFixed(4)})
-            </p>
-          ) : (
-            <div className="flex flex-col gap-2">
-              <button
-                type="button"
-                onClick={request}
-                disabled={locLoading}
-                className="rounded-lg border border-blood-600 px-3 py-2 text-sm font-medium text-blood-600 hover:bg-blood-50 disabled:opacity-60"
-              >
-                {locLoading ? "Getting location..." : "Use current location"}
-              </button>
-              {locError && <p className="text-xs text-blood-600">{locError}</p>}
-              <div className="grid grid-cols-2 gap-2">
-                <input
-                  type="number"
-                  step="any"
-                  placeholder="Latitude"
-                  className="input"
-                  value={manualLat}
-                  onChange={(e) => setManualLat(e.target.value)}
-                />
-                <input
-                  type="number"
-                  step="any"
-                  placeholder="Longitude"
-                  className="input"
-                  value={manualLng}
-                  onChange={(e) => setManualLng(e.target.value)}
-                />
-              </div>
-            </div>
-          )}
+          <LocationMap
+            value={coords}
+            onChange={(next) => {
+              setCoords(next);
+              setManualLat(String(next.lat));
+              setManualLng(String(next.lng));
+            }}
+            height={300}
+          />
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <input
+              type="number"
+              step="any"
+              placeholder="Latitude"
+              className="input"
+              value={manualLat}
+              onChange={(e) => { setManualLat(e.target.value); setCoords(null); }}
+            />
+            <input
+              type="number"
+              step="any"
+              placeholder="Longitude"
+              className="input"
+              value={manualLng}
+              onChange={(e) => { setManualLng(e.target.value); setCoords(null); }}
+            />
+          </div>
         </div>
 
         {error && <p className="text-sm text-blood-600">{error}</p>}

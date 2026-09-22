@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/frontend/hooks/useAuth";
+import LocationMap from "@/frontend/components/LocationMap";
 import { getUserProfile } from "@/backend/lib/userProfile";
 import {
   Droplet,
@@ -40,9 +41,7 @@ import {
      design — wiring these needs real schemas that don't exist yet):
      - "Nearby donors/requesters" below are seeded mock data, clearly
        marked MOCK_ — not real people, not a real directory query.
-     - The map is an illustrative, non-interactive stand-in (a styled
-       grid with pins) — not a real maps SDK. Picking a "location" just
-       records a label, not real coordinates.
+     - The map uses OpenStreetMap + Leaflet with browser geolocation and map selection.
      - Notifications and inbox messages are held in local component
        state, not persisted or delivered anywhere. Nothing here sends
        a real push, SMS, or email to anyone.
@@ -58,7 +57,7 @@ import {
 
    Wiring the rest to something real later means adding:
      MOCK_DONORS / MOCK_REQUESTS     -> a real nearby-users query (matchDonors in @/backend/lib/matching is a starting point)
-     the map panel                   -> an actual maps SDK
+     the map panel                   -> OpenStreetMap + Leaflet (already wired)
      handleRequestSent/handleApprove -> real notification dispatch (new Firestore collection)
      the inbox thread list           -> a real messaging backend (new Firestore collection)
      CallButton's mock phone         -> the real matched user's number
@@ -465,55 +464,21 @@ function CallButton({ phone, name }) {
 }
 
 /* ---------------------------------------------------------------
-   Illustrative "map" — a styled grid with pins, not a real maps SDK.
-   Clicking a pin or the "Use this spot" button just records a label
-   for the mock flow; there is no real geocoding happening.
+   Real location picker backed by OpenStreetMap + Leaflet.
 ------------------------------------------------------------------ */
 function MapPicker({ value, onPick }) {
-  const spots = [
-    { id: "s1", label: "Civil Lines", x: "28%", y: "32%" },
-    { id: "s2", label: "Swaroop Nagar", x: "58%", y: "22%" },
-    { id: "s3", label: "Kakadeo", x: "42%", y: "58%" },
-    { id: "s4", label: "Kalyanpur", x: "72%", y: "48%" },
-    { id: "s5", label: "Govind Nagar", x: "20%", y: "68%" },
-  ];
+  const [coords, setCoords] = useState(null);
 
   return (
     <div>
-      <div
-        className="relative rounded-2xl overflow-hidden"
-        style={{ height: 260, background: "linear-gradient(135deg, #EEF2F0, #E4ECF5)", border: `1px solid ${C.border}` }}
-      >
-        {/* faux street grid */}
-        <svg className="absolute inset-0 w-full h-full opacity-40" preserveAspectRatio="none">
-          {Array.from({ length: 6 }).map((_, i) => (
-            <line key={`h${i}`} x1="0" y1={`${(i + 1) * 14}%`} x2="100%" y2={`${(i + 1) * 14}%`} stroke="#B9C4C0" strokeWidth="1" />
-          ))}
-          {Array.from({ length: 8 }).map((_, i) => (
-            <line key={`v${i}`} x1={`${(i + 1) * 11}%`} y1="0" x2={`${(i + 1) * 11}%`} y2="100%" stroke="#B9C4C0" strokeWidth="1" />
-          ))}
-        </svg>
-
-        {spots.map((s) => {
-          const active = value === s.label;
-          return (
-            <button
-              key={s.id}
-              onClick={() => onPick(s.label)}
-              className="absolute flex flex-col items-center transition-transform hover:scale-110"
-              style={{ left: s.x, top: s.y, transform: "translate(-50%, -100%)" }}
-            >
-              <MapPin size={active ? 26 : 20} color={active ? C.brick : C.ink} fill={active ? C.brick : "none"} strokeWidth={active ? 0 : 1.8} />
-              {active && (
-                <span className="mt-1 px-2 py-0.5 rounded-full text-[10px] font-semibold text-white" style={{ background: C.ink, fontFamily: F, animation: "fadeUp 0.2s ease" }}>
-                  {s.label}
-                </span>
-              )}
-            </button>
-          );
-        })}
-      </div>
-
+      <LocationMap
+        value={coords}
+        onChange={(next, label) => {
+          setCoords(next);
+          onPick(label || `Selected location (${next.lat.toFixed(4)}, ${next.lng.toFixed(4)})`);
+        }}
+        height={300}
+      />
       {value && (
         <p className="text-xs mt-2 flex items-center gap-1.5" style={{ color: C.sub, fontFamily: F }}>
           <Navigation size={12} /> Selected: <span style={{ color: C.ink, fontWeight: 600 }}>{value}</span>
@@ -524,7 +489,7 @@ function MapPicker({ value, onPick }) {
 }
 
 /* ---------------------------------------------------------------
-   Map modal — opens the illustrative map as a floating window instead
+   Map modal — opens the real map as a floating window instead
    of expanding inline (which used to push list items around and crowd
    the bottom of the screen). Same overlay pattern as Avatar's
    tap-to-expand photo view.
