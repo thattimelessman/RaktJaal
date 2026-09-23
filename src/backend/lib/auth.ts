@@ -9,6 +9,31 @@ import {
 } from "firebase/auth";
 import { auth, googleProvider } from "@/backend/lib/firebase";
 
+export const NOT_REGISTERED_MESSAGE = "This email is not registered, please sign up.";
+
+/**
+ * Firebase's email-enumeration protection collapses "no such user" and
+ * "wrong password" into one `auth/invalid-credential` error on the client.
+ * This asks our server (Admin SDK) whether the email is actually registered.
+ * Returns null if the check itself fails, so callers can fall back safely.
+ */
+async function lookupEmailRegistration(
+  email: string
+): Promise<{ exists: boolean; providers: string[] } | null> {
+  try {
+    const res = await fetch("/api/auth/check-email", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return { exists: Boolean(data.exists), providers: data.providers ?? [] };
+  } catch {
+    return null;
+  }
+}
+
 /** Friendly messages for the Firebase Auth error codes we actually expect to hit. */
 function friendlyAuthError(err: unknown): string {
   const code = (err as { code?: string })?.code ?? "";
@@ -20,6 +45,7 @@ function friendlyAuthError(err: unknown): string {
     case "auth/weak-password":
       return "Password should be at least 6 characters.";
     case "auth/user-not-found":
+      return NOT_REGISTERED_MESSAGE;
     case "auth/wrong-password":
     case "auth/invalid-credential":
       return "Incorrect email or password.";
@@ -66,6 +92,19 @@ export async function signInWithEmail(
     return cred;
   } catch (err) {
     if (err instanceof Error && !(err as { code?: string }).code) throw err;
+
+    const code = (err as { code?: string })?.code;
+    if (code === "auth/invalid-credential" || code === "auth/user-not-found" || code === "auth/wrong-password") {
+      const reg = await lookupEmailRegistration(email);
+      if (reg && !reg.exists) throw new Error(NOT_REGISTERED_MESSAGE);
+      if (reg && reg.exists && !reg.providers.includes("password")) {
+        // Account exists but was created via Google, so there is no password to get wrong.
+        throw new Error("This email is registered with Google. Please use “Sign in with Google”.");
+      }
+      // Registered with a password, so the password really is wrong.
+      throw new Error("Incorrect email or password.");
+    }
+
     throw new Error(friendlyAuthError(err));
   }
 }
@@ -115,6 +154,13 @@ export async function signInWithGoogle(): Promise<UserCredential> {
 }
 
 export async function resetPassword(email: string): Promise<void> {
+  // With enumeration protection on, Firebase silently "succeeds" for unknown emails,
+  // which would tell the user a reset mail was sent when none was. Check first.
+  const reg = await lookupEmailRegistration(email);
+  if (reg && !reg.exists) throw new Error(NOT_REGISTERED_MESSAGE);
+  if (reg && reg.exists && !reg.providers.includes("password")) {
+    throw new Error("This email is registered with Google, so there is no password to reset.");
+  }
   try {
     await sendPasswordResetEmail(auth, email);
   } catch (err) {
@@ -125,4 +171,3 @@ export async function resetPassword(email: string): Promise<void> {
 export async function signOutUser(): Promise<void> {
   await signOut(auth);
 }
-

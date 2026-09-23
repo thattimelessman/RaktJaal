@@ -15,8 +15,18 @@ export async function POST(request: Request) {
     if (!user.email) return NextResponse.json({ error: "No email address is available for this account." }, { status: 400 });
     await verifyEmailOtp(user.uid, user.email, "delete", String(code));
 
-    await adminDb.collection("users").doc(user.uid).delete();
+    // Delete the Auth user first: it is the source of truth for "is this email registered?".
+    // If this throws, nothing else has been touched and the user can simply retry.
     await adminAuth.deleteUser(user.uid);
+
+    // Best-effort cleanup of the profile doc and any leftover OTP docs.
+    // The account is already gone at this point, so failures here must not fail the request.
+    await Promise.allSettled([
+      adminDb.collection("users").doc(user.uid).delete(),
+      adminDb.collection("emailOtps").doc(`registration_${user.uid}`).delete(),
+      adminDb.collection("emailOtps").doc(`delete_${user.uid}`).delete(),
+    ]);
+
     return NextResponse.json({ ok: true });
   } catch (err) {
     console.error(err);

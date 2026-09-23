@@ -1810,7 +1810,12 @@ export default function ProfilePage() {
   };
 
   const handleDeleteAccount = async () => {
-    await signOutUser();
+    // The account no longer exists server-side; clear the stale local session.
+    try {
+      await signOutUser();
+    } catch {
+      /* session is already invalid after deletion, safe to ignore */
+    }
     router.push("/register");
   };
 
