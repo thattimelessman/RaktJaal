@@ -586,7 +586,7 @@ function FAQ() {
     ["Is my contact info public?", "No. Details only unlock in-app once a donor taps \u201cI can help\u201d — nothing is visible beforehand."],
     ["Do I need to be a registered donor?", "Yes, a short profile with blood type and last donation date, so matches stay accurate and eligible."],
     ["How is urgency decided?", "The requester marks it. Emergency requests get a countdown timer and sit above standard ones in the feed."],
-    ["Is RaktJaal live yet?", "Not yet — this is a working student prototype. We're building toward a pilot in one city first."],
+    ["Is RaktJaal live yet?", "Yes — this is a working student prototype for now. We're building toward a pilot in one city first."],
     ["Do hospitals pay to use this?", "The plan is to keep it free for requesters and donors. Hospital verification details are still being worked out."],
   ];
   const [open, setOpen] = useState(0);
