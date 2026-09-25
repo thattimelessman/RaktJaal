@@ -89,6 +89,10 @@ export async function signInWithEmail(
       await signOut(auth);
       throw new Error("Please verify your email with the OTP we sent before signing in.");
     }
+    // Two-step verification (if enabled on this account) is handled by
+    // AuthProvider/useAuth: it holds the freshly-created session back as
+    // `pendingTwoFactorUser` instead of `user` until the OTP is confirmed,
+    // rather than being decided here.
     return cred;
   } catch (err) {
     if (err instanceof Error && !(err as { code?: string }).code) throw err;
@@ -109,7 +113,7 @@ export async function signInWithEmail(
   }
 }
 
-export async function sendEmailOtp(purpose: "registration" | "delete"): Promise<void> {
+export async function sendEmailOtp(purpose: "registration" | "delete" | "twofactor"): Promise<void> {
   if (!auth.currentUser) throw new Error("No signed-in account found.");
   const token = await auth.currentUser.getIdToken(true);
   const response = await fetch("/api/email-otp/send", {
@@ -121,7 +125,7 @@ export async function sendEmailOtp(purpose: "registration" | "delete"): Promise<
   if (!response.ok) throw new Error(data.error || "Could not send the email OTP.");
 }
 
-export async function verifyEmailOtpCode(code: string, purpose: "registration" | "delete"): Promise<void> {
+export async function verifyEmailOtpCode(code: string, purpose: "registration" | "delete" | "twofactor"): Promise<void> {
   if (!auth.currentUser) throw new Error("No signed-in account found.");
   const token = await auth.currentUser.getIdToken(true);
   const response = await fetch("/api/email-otp/verify", {

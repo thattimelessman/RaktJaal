@@ -22,6 +22,7 @@ import { signInWithEmail, signInWithGoogle, signUpWithEmail, resetPassword, send
 import { reload } from "firebase/auth";
 import { auth } from "@/backend/lib/firebase";
 import { createUserProfile, ensureUserProfile } from "@/backend/lib/userProfile";
+import { useAuth } from "@/frontend/hooks/useAuth";
 
 const C = {
   ink: "#14110F",
@@ -442,12 +443,34 @@ function RightTagline() {
 
 function LoginForm({ onSwitch }) {
   const router = useRouter();
+  const { user: authedUser, pendingTwoFactorUser, completeTwoFactor } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [touched, setTouched] = useState(false);
   const [shake, setShake] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [authError, setAuthError] = useState("");
+  // True from the moment this form's own submit succeeds, so the
+  // navigation effect below only fires for a sign-in *this form* just
+  // did — not for someone who happens to already have a session.
+  const [awaitingSession, setAwaitingSession] = useState(false);
+
+  // Once useAuth confirms a real (non-2FA-pending) session after this
+  // form's own submit, move on. This is what actually handles routing —
+  // handleSubmit itself no longer guesses whether 2FA is required.
+  useEffect(() => {
+    if (awaitingSession && authedUser && !pendingTwoFactorUser) {
+      router.push("/action");
+    }
+  }, [awaitingSession, authedUser, pendingTwoFactorUser, router]);
+
+  // Two-step verification: once signInWithEmail succeeds for an account
+  // with 2FA on, useAuth holds the session as pendingTwoFactorUser (and
+  // has already sent the OTP) instead of exposing it as a real session.
+  const [otp, setOtp] = useState("");
+  const [otpStatus, setOtpStatus] = useState("");
+  const [verifyingOtp, setVerifyingOtp] = useState(false);
+  const [resendingOtp, setResendingOtp] = useState(false);
 
   const emailCheck = useMemo(() => validateEmail(email), [email]);
   const canSubmit = emailCheck.valid && password.length > 0;
@@ -464,12 +487,97 @@ function LoginForm({ onSwitch }) {
     setSubmitting(true);
     try {
       await signInWithEmail(email, password);
-      router.push("/action");
+      // Don't navigate here — useAuth needs a moment to check whether this
+      // account has 2FA on. The effect above routes once it resolves to a
+      // real session; if 2FA is on, pendingTwoFactorUser flips instead and
+      // this component renders the OTP screen below.
+      setAwaitingSession(true);
     } catch (err) {
       setAuthError(err?.message || "Couldn't sign in. Please try again.");
       setSubmitting(false);
     }
   };
+
+  const verifyTwoFactor = async () => {
+    if (!/^\d{6}$/.test(otp)) {
+      setOtpStatus("Enter the 6-digit OTP from your email.");
+      return;
+    }
+    setVerifyingOtp(true);
+    setOtpStatus("");
+    try {
+      await verifyEmailOtpCode(otp, "twofactor");
+      completeTwoFactor();
+      setAwaitingSession(true); // let the effect above route once `user` flips
+    } catch (err) {
+      setOtpStatus(err?.message || "Could not verify the OTP.");
+    } finally {
+      setVerifyingOtp(false);
+    }
+  };
+
+  const resendTwoFactor = async () => {
+    setResendingOtp(true);
+    try {
+      await sendEmailOtp("twofactor");
+      setOtpStatus("A new OTP was sent to your email.");
+    } catch (err) {
+      setOtpStatus(err?.message || "Could not resend the OTP.");
+    } finally {
+      setResendingOtp(false);
+    }
+  };
+
+  const cancelTwoFactor = async () => {
+    await signOutUser();
+    setOtp("");
+    setOtpStatus("");
+    setSubmitting(false);
+    setAwaitingSession(false);
+  };
+
+  if (pendingTwoFactorUser) {
+    return (
+      <div className="w-full max-w-sm mx-auto" style={{ animation: "fadeUp 0.3s ease" }}>
+        <div className="text-center">
+          <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-full bg-red-50 text-2xl">🔐</div>
+          <h1 className="text-3xl font-bold tracking-tight mb-2" style={{ color: C.ink, fontFamily: FD }}>Two-step verification</h1>
+          <p className="text-sm leading-6" style={{ color: C.sub, fontFamily: FB }}>
+            Enter the 6-digit OTP we sent to <strong>{pendingTwoFactorUser.email}</strong> to finish signing in.
+          </p>
+        </div>
+
+        {otpStatus && (
+          <p className="mt-4 rounded-2xl p-3 text-xs text-center" style={{ background: C.field, color: C.ink, fontFamily: FB }}>
+            {otpStatus}
+          </p>
+        )}
+
+        <div className="mt-6 flex flex-col gap-3">
+          <input
+            value={otp}
+            onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
+            onKeyDown={(e) => e.key === "Enter" && verifyTwoFactor()}
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            maxLength={6}
+            placeholder="Enter 6-digit OTP"
+            className="w-full py-3.5 px-5 rounded-full text-center text-lg tracking-[0.35em] outline-none"
+            style={{ background: C.field, color: C.ink, fontFamily: "monospace", border: `1.5px solid ${C.ink}12` }}
+          />
+          <button type="button" onClick={verifyTwoFactor} disabled={verifyingOtp || otp.length !== 6} className="w-full py-3.5 rounded-full text-white text-sm font-semibold disabled:opacity-60" style={{ background: C.brick, fontFamily: FB }}>
+            {verifyingOtp ? "Verifying..." : "Verify & continue"}
+          </button>
+          <button type="button" onClick={resendTwoFactor} disabled={resendingOtp} className="w-full py-3.5 rounded-full text-sm font-semibold disabled:opacity-60" style={{ border: `1.5px solid ${C.ink}1A`, color: C.ink, fontFamily: FB }}>
+            {resendingOtp ? "Sending..." : "Resend OTP"}
+          </button>
+          <button type="button" onClick={cancelTwoFactor} className="py-2 text-sm" style={{ color: C.sub, fontFamily: FB }}>
+            Cancel and use a different account
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <form

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/frontend/hooks/useAuth";
-import { signOutUser, sendEmailOtp, deleteAccountWithEmailOtp } from "@/backend/lib/auth";
+import { signOutUser, sendEmailOtp, verifyEmailOtpCode, deleteAccountWithEmailOtp } from "@/backend/lib/auth";
 import { getUserProfile, updateUserProfile } from "@/backend/lib/userProfile";
 import {
   Droplet,
@@ -1137,58 +1137,101 @@ function CodeConfirmDelete({ onConfirm, onCancel }) {
 }
 
 /**
- * Two-step verification setup. Previously "Add two-step verification"
- * flipped the flag straight to true with no verification step at all, and
- * the enabled state permanently claimed "one-time codes sent to your
- * email" — a claim this app can't back since there's no email backend.
- * Now: a local code is shown, the person has to type it back to enable,
- * and once enabled the row just says "Enabled" — no ongoing claim about
- * how codes get delivered.
+ * Two-step verification setup. Sends a real 6-digit OTP to the account's
+ * email via the same /api/email-otp/send + /api/email-otp/verify backend
+ * used for account deletion (purpose "twofactor"), and only flips the
+ * enabled flag once that code is confirmed server-side.
  */
 function TwoFactorSetup({ onVerified, onCancel }) {
-  const [code] = useState(() => String(Math.floor(100000 + Math.random() * 900000)));
-  const [input, setInput] = useState("");
-  const matches = input.trim() === code;
+  const [code, setCode] = useState("");
+  const [status, setStatus] = useState("Sending a 6-digit OTP to your account email…");
+  const [sending, setSending] = useState(true);
+  const [verifying, setVerifying] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    sendEmailOtp("twofactor")
+      .then(() => { if (alive) setStatus("We sent a 6-digit OTP to your email. Enter it below to enable two-step verification."); })
+      .catch((err) => { if (alive) setStatus(err?.message || "Could not send the OTP."); })
+      .finally(() => { if (alive) setSending(false); });
+    return () => { alive = false; };
+  }, []);
+
+  const resend = async () => {
+    setSending(true);
+    try {
+      await sendEmailOtp("twofactor");
+      setStatus("A new OTP was sent to your email.");
+    } catch (err) {
+      setStatus(err?.message || "Could not resend the OTP.");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const verify = async () => {
+    if (!/^\d{6}$/.test(code)) {
+      setStatus("Enter the 6-digit OTP from your email.");
+      return;
+    }
+    setVerifying(true);
+    try {
+      await verifyEmailOtpCode(code, "twofactor");
+      onVerified();
+    } catch (err) {
+      setStatus(err?.message || "Could not verify the OTP.");
+    } finally {
+      setVerifying(false);
+    }
+  };
 
   return (
     <div className="flex flex-col gap-3">
       <div>
         <p className="text-sm" style={{ color: C.ink, fontFamily: F, fontWeight: 600 }}>
-          Enter this code to confirm two-step verification
+          Enter the code we emailed you to confirm two-step verification
         </p>
         <p className="text-[12px] mt-1 max-w-sm" style={{ color: C.sub, fontFamily: F }}>
-          RaktJaal has no email service yet, so this can't be a real emailed code — it's shown right here as a stand-in confirmation step.
+          A one-time code is sent to your account email each time you sign in with two-step verification on.
         </p>
       </div>
-      <span
-        className="px-4 py-2 rounded-lg text-lg tracking-[0.3em] font-bold w-fit"
-        style={{ background: C.chip, color: C.ink, fontFamily: "monospace" }}
-      >
-        {code}
-      </span>
+      <p className="text-xs" style={{ color: C.sub, fontFamily: F }}>{status}</p>
       <input
-        value={input}
-        onChange={(e) => setInput(e.target.value.replace(/\D/g, "").slice(0, 6))}
+        value={code}
+        onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+        onKeyDown={(e) => e.key === "Enter" && verify()}
         inputMode="numeric"
-        placeholder="Enter the 6-digit code above"
-        className="w-full max-w-xs text-sm bg-transparent outline-none border-b pb-1"
-        style={{ color: C.ink, fontFamily: F, fontWeight: 500, borderColor: C.ink }}
+        autoComplete="one-time-code"
+        maxLength={6}
+        placeholder="Enter 6-digit OTP"
+        disabled={sending || verifying}
+        className="w-full max-w-xs text-center text-lg tracking-[0.3em] px-4 py-2 rounded-lg outline-none"
+        style={{ background: C.chip, color: C.ink, fontFamily: "monospace" }}
       />
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 flex-wrap">
         <button
           onClick={onCancel}
+          disabled={verifying}
           className="text-xs px-3.5 py-2 rounded-full transition-colors hover:bg-[#F4F4F5]"
           style={{ border: `1px solid ${C.border}`, color: C.ink, fontFamily: F, fontWeight: 600 }}
         >
           Cancel
         </button>
         <button
-          onClick={onVerified}
-          disabled={!matches}
-          className="text-xs px-3.5 py-2 rounded-full text-white transition-opacity"
-          style={{ background: C.ink, fontFamily: F, fontWeight: 600, opacity: matches ? 1 : 0.4 }}
+          onClick={resend}
+          disabled={sending || verifying}
+          className="text-xs px-3.5 py-2 rounded-full transition-colors hover:bg-[#F4F4F5]"
+          style={{ border: `1px solid ${C.border}`, color: C.ink, fontFamily: F, fontWeight: 600 }}
         >
-          Verify & enable
+          Resend OTP
+        </button>
+        <button
+          onClick={verify}
+          disabled={code.length !== 6 || verifying}
+          className="text-xs px-3.5 py-2 rounded-full text-white transition-opacity"
+          style={{ background: C.ink, fontFamily: F, fontWeight: 600, opacity: code.length === 6 && !verifying ? 1 : 0.4 }}
+        >
+          {verifying ? "Verifying…" : "Verify & enable"}
         </button>
       </div>
     </div>

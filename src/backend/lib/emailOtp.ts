@@ -14,7 +14,9 @@ function generateOtp() {
   return crypto.randomInt(100000, 1000000).toString();
 }
 
-export async function createEmailOtp(uid: string, email: string, purpose: "registration" | "delete") {
+export type EmailOtpPurpose = "registration" | "delete" | "twofactor";
+
+export async function createEmailOtp(uid: string, email: string, purpose: EmailOtpPurpose) {
   const ref = adminDb.collection("emailOtps").doc(`${purpose}_${uid}`);
   const existing = await ref.get();
   if (existing.exists) {
@@ -39,7 +41,8 @@ export async function createEmailOtp(uid: string, email: string, purpose: "regis
   return code;
 }
 
-export async function verifyEmailOtp(uid: string, email: string, purpose: "registration" | "delete", code: string) {
+export async function verifyEmailOtp(uid: string, email: string, purpose: EmailOtpPurpose, code: string) {
+
   const ref = adminDb.collection("emailOtps").doc(`${purpose}_${uid}`);
   const snap = await ref.get();
   if (!snap.exists) throw new Error("OTP not found. Please request a new OTP.");
