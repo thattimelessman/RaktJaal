@@ -3,39 +3,178 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Donors: anyone can read the fields needed to render a match card,
-    // but only the authenticated donor (uid from email/password or Google
-    // sign-in) can create/update their own document, keyed by their
-    // Firebase Auth uid. Phone number is included in reads for now
-    // (Phase 1 has no field-level read restriction) — the app layer simply
-    // never displays it. Phase 2 should move `phone` into a subcollection
-    // guarded by request-level "I can help" reveals if stricter
-    // server-side enforcement is needed.
-    match /donors/{donorId} {
-      allow read: if true;
-      allow create: if request.auth != null && request.auth.uid == donorId;
-      allow update: if request.auth != null && request.auth.uid == donorId;
-      allow delete: if false;
+    function signedIn() {
+      return request.auth != null;
     }
 
-    // Users: the account/profile doc every signed-in person has (name, dob,
-    // address, bloodType, phone, profile photo, etc — see src/lib/userProfile.ts).
-    // Only the owner can read or write their own doc, keyed by Firebase Auth uid.
+    function isSelf(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    /* ---------------------------------------------------------------
+       users/{uid}: the private account/profile doc. Owner only.
+       (Server routes use the Admin SDK and bypass these rules.)
+    ---------------------------------------------------------------- */
     match /users/{uid} {
-      allow read: if request.auth != null && request.auth.uid == uid;
-      allow create: if request.auth != null && request.auth.uid == uid;
-      allow update: if request.auth != null && request.auth.uid == uid;
-      allow delete: if request.auth != null && request.auth.uid == uid;
+      allow read, create, update, delete: if isSelf(uid);
     }
 
-    // Requests: anyone can post a request or read open requests (no auth
-    // gate in Phase 1, matching the "no login friction" hospital-view goal
-    // from the demo script). Tighten this once hospital accounts exist.
+    /* ---------------------------------------------------------------
+       donors/{uid}: the public donor card used for nearby search.
+       Readable by signed-in users only (so the directory can't be
+       scraped anonymously). Written only by the donor themselves.
+       Docs created by the main app hold NO phone number; that lives
+       in donors_private.
+    ---------------------------------------------------------------- */
+    match /donors/{donorId} {
+      allow read: if signedIn();
+      allow create, update, delete: if isSelf(donorId);
+    }
+
+    /* ---------------------------------------------------------------
+       donors_private/{uid}: the owner's own copy of their phone number.
+       Owner-only. It is never read by anyone else: the counter-party gets
+       the number through requests/{id}/contacts (below), and only once a
+       request between the two has been approved.
+    ---------------------------------------------------------------- */
+    match /donors_private/{donorId} {
+      allow read, create, update, delete: if isSelf(donorId);
+    }
+
+    /* ---------------------------------------------------------------
+       requests/{requesterUid}_{donorUid}: one person asking one donor.
+       - only the requester can create it, only as themselves, and only
+         in the "pending" state
+       - only the two people on it can read it
+       - the DONOR may move it pending -> approved/declined
+       - the REQUESTER may move it pending -> cancelled
+       - identity/blood/location fields can never change after create
+    ---------------------------------------------------------------- */
     match /requests/{requestId} {
-      allow read: if true;
-      allow create: if true;
-      allow update: if true; // needed for status changes (fulfilled/expired)
+      allow read: if signedIn()
+        && (resource.data.requesterUid == request.auth.uid
+            || resource.data.donorUid == request.auth.uid);
+
+      allow create: if signedIn()
+        && request.resource.data.requesterUid == request.auth.uid
+        && request.resource.data.donorUid != request.auth.uid
+        && requestId == request.auth.uid + '_' + request.resource.data.donorUid
+        && request.resource.data.status == 'pending'
+        && request.resource.data.units is int
+        && request.resource.data.units >= 1
+        && request.resource.data.units <= 20;
+
+      allow update: if signedIn()
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['status', 'threadId', 'updatedAt'])
+        && (
+          // donor decides on a pending request
+          (resource.data.status == 'pending'
+            && resource.data.donorUid == request.auth.uid
+            && request.resource.data.status in ['approved', 'declined'])
+          ||
+          // requester withdraws a pending request
+          (resource.data.status == 'pending'
+            && resource.data.requesterUid == request.auth.uid
+            && request.resource.data.status == 'cancelled')
+          ||
+          // requester re-opens their own cancelled request
+          (resource.data.status == 'cancelled'
+            && resource.data.requesterUid == request.auth.uid
+            && request.resource.data.status == 'pending')
+        );
+
+      allow delete: if false;
+
+      /* contacts/{uid}: that person's phone number, shared with the other
+         participant of this request. Symmetric by design (a donor must be able
+         to call the requester just as the requester can call the donor).
+         - each person may write ONLY their own contact doc
+         - either participant may read them, but ONLY once approved,
+           so a pending request never exposes a number */
+      match /contacts/{contactUid} {
+        allow create, update: if isSelf(contactUid)
+          && request.auth.uid in [
+               get(/databases/$(database)/documents/requests/$(requestId)).data.requesterUid,
+               get(/databases/$(database)/documents/requests/$(requestId)).data.donorUid
+             ]
+          && request.resource.data.keys().hasOnly(['uid', 'phone', 'updatedAt'])
+          && request.resource.data.uid == request.auth.uid;
+
+        allow read: if signedIn()
+          && get(/databases/$(database)/documents/requests/$(requestId)).data.status == 'approved'
+          && request.auth.uid in [
+               get(/databases/$(database)/documents/requests/$(requestId)).data.requesterUid,
+               get(/databases/$(database)/documents/requests/$(requestId)).data.donorUid
+             ];
+
+        allow delete: if false;
+      }
+    }
+
+    /* ---------------------------------------------------------------
+       threads/{id}: chat between the two people on an approved request.
+       Only the donor can open it (as part of approving), and only for a
+       request that exists. Only participants can read or write.
+    ---------------------------------------------------------------- */
+    match /threads/{threadId} {
+      allow read: if signedIn() && request.auth.uid in resource.data.participants;
+
+      // NOTE: the thread is created in the SAME batch that flips the request to
+      // 'approved'. Inside a batch, get()/exists() see the state from BEFORE the
+      // batch, so the request is still 'pending' here. Do NOT add a status check to
+      // this rule, or approving will start failing with permission-denied.
+      allow create: if signedIn()
+        && request.auth.uid in request.resource.data.participants
+        && request.resource.data.participants.size() == 2
+        && exists(/databases/$(database)/documents/requests/$(threadId))
+        && get(/databases/$(database)/documents/requests/$(threadId)).data.donorUid == request.auth.uid;
+
+      // Participants may update last-message + unread counters only.
+      allow update: if signedIn()
+        && request.auth.uid in resource.data.participants
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['lastMessage', 'lastMessageAt', 'unread']);
+
+      allow delete: if false;
+
+      match /messages/{messageId} {
+        allow read: if signedIn()
+          && request.auth.uid in get(/databases/$(database)/documents/threads/$(threadId)).data.participants;
+
+        allow create: if signedIn()
+          && request.auth.uid in get(/databases/$(database)/documents/threads/$(threadId)).data.participants
+          && request.resource.data.from == request.auth.uid
+          && request.resource.data.type in ['text', 'image', 'file'];
+
+        allow update, delete: if false;
+      }
+    }
+
+    /* ---------------------------------------------------------------
+       notifications/{id}: per-user inbox items.
+       - the recipient reads them and marks them read
+       - any signed-in user may create one addressed to someone else
+         (that is how "you got a request" reaches the donor); content is
+         constrained, and it cannot be created as already-read.
+    ---------------------------------------------------------------- */
+    match /notifications/{id} {
+      allow read: if signedIn() && resource.data.uid == request.auth.uid;
+
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['uid', 'title', 'body', 'tone', 'read', 'createdAt'])
+        && request.resource.data.read == false
+        && request.resource.data.tone in ['info', 'success']
+        && request.resource.data.title is string && request.resource.data.title.size() <= 120
+        && request.resource.data.body is string && request.resource.data.body.size() <= 300;
+
+      allow update: if signedIn()
+        && resource.data.uid == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']);
+
       allow delete: if false;
     }
+
+    // emailOtps and anything else: no client access (Admin SDK only).
   }
 }

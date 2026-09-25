@@ -1,10 +1,19 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useRef, useState, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/frontend/hooks/useAuth";
 import LocationMap from "@/frontend/components/LocationMap";
 import { getUserProfile } from "@/backend/lib/userProfile";
+import { useRequestsBackend } from "@/frontend/hooks/useRequestsBackend";
+import {
+  createDonationRequest,
+  findNearbyDonors,
+  getContactPhone,
+  subscribeMessages,
+  timeAgo,
+  MAX_INLINE_ATTACHMENT_BYTES,
+} from "@/backend/lib/requests";
 import {
   Droplet,
   MapPin,
@@ -33,35 +42,20 @@ import {
    The very first thing a signed-in person sees is a minimal picker —
    nothing else is rendered until they choose a direction.
 
-   BACKEND STATUS:
-   - Who's signed in is real: Firebase Auth (useAuth) + the person's
-     Firestore profile doc (users/{uid} via getUserProfile), the same
-     source ProfilePage.jsx reads. No more Authstore.js/localStorage.
-   - Still UI-only / mock, deliberately (unchanged from the original
-     design — wiring these needs real schemas that don't exist yet):
-     - "Nearby donors/requesters" below are seeded mock data, clearly
-       marked MOCK_ — not real people, not a real directory query.
-     - The map uses OpenStreetMap + Leaflet with browser geolocation and map selection.
-     - Notifications and inbox messages are held in local component
-       state, not persisted or delivered anywhere. Nothing here sends
-       a real push, SMS, or email to anyone.
-     - Mock donor/requester phone numbers are placeholder digits used
-       only to demo the post-approval "Call" affordance below — they
-       are not real numbers and nothing here actually dials or reaches
-       anyone. The signed-in user's own contact info still only ever
-       comes from their real profile fields.
-   - The signed-in user's own avatar uses their real uploaded profile
-     photo (user.profilePhoto from Firestore) when present, the same
-     field ProfilePage.jsx reads — mock donors/requesters keep
-     initials since no photo exists for them.
-
-   Wiring the rest to something real later means adding:
-     MOCK_DONORS / MOCK_REQUESTS     -> a real nearby-users query (matchDonors in @/backend/lib/matching is a starting point)
-     the map panel                   -> OpenStreetMap + Leaflet (already wired)
-     handleRequestSent/handleApprove -> real notification dispatch (new Firestore collection)
-     the inbox thread list           -> a real messaging backend (new Firestore collection)
-     CallButton's mock phone         -> the real matched user's number
-   None of the surrounding layout needs to change to make that swap.
+   BACKEND STATUS (all real, Firestore-backed, live via onSnapshot):
+   - Identity: Firebase Auth (useAuth) + users/{uid} profile.
+   - Donors: every user with a complete profile is published to
+     donors/{uid} (public card, no phone) and donors_private/{uid}
+     (phone, released only after approval). See syncDonorFromProfile.
+   - "Need Blood": findNearbyDonors() queries real donors by blood type
+     + geohash + radius. Requesting creates requests/{me}_{donor}.
+   - "Donate Blood": subscribes to requests addressed to me. Approve /
+     decline updates the request; approve also opens the chat thread and
+     notifies the requester. Another account sees this instantly.
+   - Notifications + Inbox: notifications/{id} and threads/{id}/messages.
+   - The map uses OpenStreetMap + Leaflet (browser geolocation + search).
+   All of it lives in @/backend/lib/requests and is wired through the
+   useRequestsBackend hook. Rules are in firestore.rules.
 -------------------------------------------------------------------- */
 
 const C = {
@@ -153,33 +147,13 @@ function getMissingProfileFields(user) {
   });
 }
 
-/* ---------------------------------------------------------------
-   Mock data — clearly namespaced MOCK_ so nobody mistakes this for
-   a real directory. Distances are pre-set fake numbers, not computed
-   from any real location, since the map below is illustrative only.
-   Phone numbers are placeholder digits for the Call-button demo only.
------------------------------------------------------------------- */
-const MOCK_DONORS = [
-  { id: "d1", name: "Ravi Mehta", bloodType: "O-", distanceKm: 1.2, city: "Kanpur", lastDonation: "3 months ago", verified: true, phone: "+91 98765 10001" },
-  { id: "d2", name: "Ananya Iyer", bloodType: "O-", distanceKm: 2.6, city: "Kanpur", lastDonation: "5 months ago", verified: true, phone: "+91 98765 10002" },
-  { id: "d3", name: "Farhan Ali", bloodType: "O-", distanceKm: 3.4, city: "Kanpur", lastDonation: "1 month ago", verified: false, phone: "+91 98765 10003" },
-  { id: "d4", name: "Simran Kaur", bloodType: "O-", distanceKm: 4.1, city: "Kanpur", lastDonation: "6 months ago", verified: true, phone: "+91 98765 10004" },
-  { id: "d5", name: "Devansh Rao", bloodType: "O-", distanceKm: 5.8, city: "Kanpur", lastDonation: "2 months ago", verified: false, phone: "+91 98765 10005" },
-  { id: "d6", name: "Priyansh Gupta", bloodType: "A+", distanceKm: 1.8, city: "Kanpur", lastDonation: "4 months ago", verified: true, phone: "+91 98765 10006" },
-  { id: "d7", name: "Neha Chawla", bloodType: "B+", distanceKm: 2.2, city: "Kanpur", lastDonation: "2 months ago", verified: false, phone: "+91 98765 10007" },
-  { id: "d8", name: "Karan Malhotra", bloodType: "AB+", distanceKm: 3.9, city: "Kanpur", lastDonation: "7 months ago", verified: true, phone: "+91 98765 10008" },
-];
-
-const MOCK_REQUESTS = [
-  { id: "r1", name: "Priya Sharma", bloodType: "O-", distanceKm: 0.9, hospital: "Kanpur District Hospital", units: 2, urgent: true, phone: "+91 98765 20001" },
-  { id: "r2", name: "Aditya Verma", bloodType: "O-", distanceKm: 2.1, hospital: "Regency Hospital", units: 1, urgent: false, phone: "+91 98765 20002" },
-  { id: "r3", name: "Meera Nair", bloodType: "O-", distanceKm: 3.7, hospital: "LPS Institute", units: 1, urgent: true, phone: "+91 98765 20003" },
-];
-
-function bloodTypeCompatible(need, donor) {
-  // Exact-match only for this mock filter — real compatibility rules
-  // (O- as universal donor, etc.) belong in a real matching engine.
-  return need === donor;
+/* Great-circle distance in km, used to show real distances on incoming requests. */
+function haversineKm(lat1, lng1, lat2, lng2) {
+  const toRad = (d) => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
 /* ---------------------------------------------------------------
@@ -466,8 +440,8 @@ function CallButton({ phone, name }) {
 /* ---------------------------------------------------------------
    Real location picker backed by OpenStreetMap + Leaflet.
 ------------------------------------------------------------------ */
-function MapPicker({ value, onPick }) {
-  const [coords, setCoords] = useState(null);
+function MapPicker({ value, onPick, initialCoords = null }) {
+  const [coords, setCoords] = useState(initialCoords);
 
   return (
     <div>
@@ -475,7 +449,8 @@ function MapPicker({ value, onPick }) {
         value={coords}
         onChange={(next, label) => {
           setCoords(next);
-          onPick(label || `Selected location (${next.lat.toFixed(4)}, ${next.lng.toFixed(4)})`);
+          // 2nd arg = the real coordinates, so callers can run a true distance search.
+          onPick(label || `Selected location (${next.lat.toFixed(4)}, ${next.lng.toFixed(4)})`, next);
         }}
         height={300}
       />
@@ -494,7 +469,7 @@ function MapPicker({ value, onPick }) {
    the bottom of the screen). Same overlay pattern as Avatar's
    tap-to-expand photo view.
 ------------------------------------------------------------------ */
-function MapModal({ label, value, onPick, onClose }) {
+function MapModal({ label, value, onPick, onClose, initialCoords = null }) {
   return (
     <div
       className="fixed inset-0 z-[9999] flex items-center justify-center p-4 sm:p-8"
@@ -516,7 +491,7 @@ function MapModal({ label, value, onPick, onClose }) {
             <X size={15} color={C.sub} />
           </button>
         </div>
-        <MapPicker value={value} onPick={onPick} />
+        <MapPicker value={value} onPick={onPick} initialCoords={initialCoords} />
       </div>
     </div>
   );
@@ -615,13 +590,16 @@ function FileBubble({ file, isMine }) {
 /* ---------------------------------------------------------------
    Notification bell + dropdown
 ------------------------------------------------------------------ */
-function NotificationBell({ notifications, onMarkAllRead }) {
+function NotificationBell({ notifications, ready, onMarkAllRead }) {
   const [open, setOpen] = useState(false);
   const [hover, setHover] = useState(false);
   const [ringing, setRinging] = useState(false);
   const [toast, setToast] = useState(null);
   const ref = useRef(null);
+  // Seeded with the first snapshot's newest id so notifications that already
+  // existed when the page loaded don't ring the bell / pop a toast.
   const prevIdRef = useRef(notifications[0]?.id ?? null);
+  const seededRef = useRef(false);
   const unread = notifications.filter((n) => !n.read).length;
 
   useEffect(() => {
@@ -642,9 +620,17 @@ function NotificationBell({ notifications, onMarkAllRead }) {
   // warns about. Skip while the full dropdown is already open, since
   // that's showing the same information.
   const latestId = notifications[0]?.id ?? null;
-  if (latestId !== prevIdRef.current) {
+  if (!ready) {
+    // Subscription hasn't delivered yet — nothing to compare against.
+    seededRef.current = false;
+  } else if (!seededRef.current) {
+    // First real snapshot: adopt whatever already exists silently, so old
+    // notifications don't ring the bell or pop a toast on page load.
+    seededRef.current = true;
     prevIdRef.current = latestId;
-    if (latestId && !open) {
+  } else if (latestId !== prevIdRef.current) {
+    prevIdRef.current = latestId;
+    if (latestId && !open && !notifications[0].read) {
       setRinging(true);
       setToast(notifications[0]);
     }
@@ -751,7 +737,7 @@ function NotificationBell({ notifications, onMarkAllRead }) {
                   <div className="min-w-0 flex-1">
                     <p className="text-[13px]" style={{ color: C.ink, fontFamily: F, fontWeight: 700 }}>{n.title}</p>
                     <p className="text-[12px] mt-0.5 leading-relaxed" style={{ color: C.sub, fontFamily: F }}>{n.body}</p>
-                    <p className="text-[10.5px] mt-1.5" style={{ color: C.faint, fontFamily: F, fontWeight: 600 }}>{n.time}</p>
+                    <p className="text-[10.5px] mt-1.5" style={{ color: C.faint, fontFamily: F, fontWeight: 600 }}>{timeAgo(n.createdAt)}</p>
                   </div>
                   {!n.read && <span className="w-1.5 h-1.5 rounded-full mt-2 shrink-0" style={{ background: C.brick }} />}
                 </div>
@@ -764,53 +750,97 @@ function NotificationBell({ notifications, onMarkAllRead }) {
   );
 }
 
+/* Call button inside a chat header: fetches the other person's number via the
+   request's contacts subcollection (readable only because the request is approved). */
+function ThreadCallButton({ thread, meUid }) {
+  const otherUid = thread.participants.find((p) => p !== meUid);
+  const phone = useApprovedPhone(thread.requestId || thread.id, otherUid, true);
+  const name = (otherUid && thread.names?.[otherUid]) || "Contact";
+  if (!phone) return null;
+  return <CallButton phone={phone} name={name} />;
+}
+
 /* ---------------------------------------------------------------
    Inbox — thread list + a simple chat view. All state-local; no
    messages are actually delivered anywhere.
 ------------------------------------------------------------------ */
-function InboxPanel({ threads, activeThreadId, onSelectThread, onSend, onBack }) {
+function InboxPanel({ me, threads, activeThreadId, onSelectThread, onSend, onMarkRead, onBack }) {
   const [draft, setDraft] = useState("");
+  const [sendError, setSendError] = useState("");
+  const [messages, setMessages] = useState([]);
   const active = threads.find((t) => t.id === activeThreadId);
+  const activeId = active?.id;
+
+  // Live messages for the open conversation.
+  useEffect(() => {
+    if (!activeId) { setMessages([]); return; }
+    setMessages([]);
+    const unsub = subscribeMessages(activeId, setMessages, (e) => setSendError(e.message));
+    onMarkRead?.(activeId);
+    return unsub;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeId]);
+
+  // New message arrived while this thread is open -> keep it marked read.
+  useEffect(() => {
+    if (activeId && (active?.unread?.[me.uid] || 0) > 0) onMarkRead?.(activeId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active?.unread?.[me.uid]]);
+
+  const otherName = (t) => {
+    const otherUid = t.participants.find((p) => p !== me.uid);
+    return (otherUid && t.names?.[otherUid]) || "Conversation";
+  };
+  const initialsOf = (name) => name.split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase();
   const scrollRef = useRef(null);
   const fileInputRef = useRef(null);
   const [showCamera, setShowCamera] = useState(false);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
-  }, [active?.messages?.length, activeThreadId]);
+  }, [messages.length, activeThreadId]);
 
-  const send = () => {
-    if (!draft.trim() || !active) return;
-    onSend(active.id, { type: "text", text: draft.trim() });
-    setDraft("");
+  const doSend = async (payload) => {
+    if (!active) return;
+    setSendError("");
+    try {
+      await onSend(active.id, payload);
+    } catch (e) {
+      setSendError(e?.message || "Couldn't send that message.");
+    }
   };
 
-  // Local-only attachment stub: no upload happens (no backend yet), this
-  // just drops a placeholder line into the thread so the affordance is
-  // visible and wireable later — mirrors this file's "UI only" pattern.
-  const MAX_FILE_BYTES = 50 * 1024 * 1024; // 50MB
+  const send = () => {
+    const text = draft.trim();
+    if (!text || !active) return;
+    setDraft("");
+    doSend({ type: "text", text });
+  };
 
-  const handleAttachment = (e, kind) => {
+  // Attachments are stored inline in the message doc, and Firestore caps a
+  // doc at 1 MiB, so files above MAX_INLINE_ATTACHMENT_BYTES are refused with
+  // a clear message rather than failing silently at the database.
+  const handleAttachment = (e) => {
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file || !active) return;
 
-    if (file.size > MAX_FILE_BYTES) {
-      onSend(active.id, { type: "text", text: `⚠️ "${file.name}" is over 50MB and can't be sent here.` });
+    if (file.size > MAX_INLINE_ATTACHMENT_BYTES) {
+      setSendError(`"${file.name}" is too large. Attachments can be up to ${Math.round(MAX_INLINE_ATTACHMENT_BYTES / 1024)} KB.`);
       return;
     }
 
     const isImage = file.type.startsWith("image/");
     const reader = new FileReader();
     reader.onload = () =>
-      onSend(active.id, {
+      doSend({
         type: isImage ? "image" : "file",
         url: reader.result,
         name: file.name,
         size: file.size,
         mimeType: file.type,
       });
-    reader.onerror = () => onSend(active.id, { type: "text", text: `⚠️ Couldn't attach "${file.name}".` });
+    reader.onerror = () => setSendError(`Couldn't attach "${file.name}".`);
     reader.readAsDataURL(file);
   };
 
@@ -828,7 +858,8 @@ function InboxPanel({ threads, activeThreadId, onSelectThread, onSend, onBack })
             </p>
           ) : (
             threads.map((t) => {
-              const lastMsg = t.messages[t.messages.length - 1];
+              const name = otherName(t);
+              const unread = (t.unread?.[me.uid] || 0) > 0;
               return (
                 <button
                   key={t.id}
@@ -836,14 +867,14 @@ function InboxPanel({ threads, activeThreadId, onSelectThread, onSend, onBack })
                   className="w-full flex items-center gap-3 px-5 py-3.5 text-left transition-colors hover:bg-[#F9F9F9]"
                   style={{ background: activeThreadId === t.id ? C.chip : "transparent", borderBottom: `1px solid ${C.border}` }}
                 >
-                  <Avatar initials={t.withInitials} size={38} />
+                  <Avatar initials={initialsOf(name)} size={38} />
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-sm font-semibold truncate" style={{ color: C.ink, fontFamily: F }}>{t.withName}</span>
-                      {t.unread && <span className="w-2 h-2 rounded-full shrink-0" style={{ background: C.brick }} />}
+                      <span className="text-sm font-semibold truncate" style={{ color: C.ink, fontFamily: F }}>{name}</span>
+                      {unread && <span className="w-2 h-2 rounded-full shrink-0" style={{ background: C.brick }} />}
                     </div>
-                    <p className="text-xs truncate mt-0.5" style={{ color: C.sub, fontFamily: F }}>
-                      {!lastMsg ? "Say hello" : lastMsg.type === "image" ? "📷 Photo" : lastMsg.type === "file" ? `📎 ${lastMsg.name}` : lastMsg.text}
+                    <p className="text-xs truncate mt-0.5" style={{ color: unread ? C.ink : C.sub, fontFamily: F, fontWeight: unread ? 700 : 400 }}>
+                      {t.lastMessage || "Say hello"}
                     </p>
                   </div>
                 </button>
@@ -861,49 +892,55 @@ function InboxPanel({ threads, activeThreadId, onSelectThread, onSend, onBack })
               <button onClick={onBack} className="sm:hidden w-8 h-8 rounded-full flex items-center justify-center hover:bg-[#F4F4F5]">
                 <ArrowLeft size={16} color={C.ink} />
               </button>
-              <Avatar initials={active.withInitials} size={34} />
+              <Avatar initials={initialsOf(otherName(active))} size={34} />
               <div className="min-w-0 flex-1">
-                <p className="text-sm font-semibold truncate" style={{ color: C.ink, fontFamily: F }}>{active.withName}</p>
+                <p className="text-sm font-semibold truncate" style={{ color: C.ink, fontFamily: F }}>{otherName(active)}</p>
                 <p className="text-[11px]" style={{ color: C.sub, fontFamily: F }}>{active.context}</p>
               </div>
-              {active.phone && <CallButton phone={active.phone} name={active.withName} />}
+              <ThreadCallButton thread={active} meUid={me.uid} />
             </div>
             <div ref={scrollRef} className="flex-1 overflow-y-auto rk-scroll px-5 py-4 flex flex-col gap-2.5">
-              {active.messages.length === 0 ? (
+              {messages.length === 0 ? (
                 <p className="text-xs text-center mt-8" style={{ color: C.faint, fontFamily: F }}>No messages yet — say hello.</p>
               ) : (
-                active.messages.map((m, i) => (
-                  <div key={i} className={`flex ${m.from === "me" ? "justify-end" : "justify-start"}`}>
+                messages.map((m) => {
+                  const mine = m.from === me.uid;
+                  return (
+                  <div key={m.id} className={`flex ${mine ? "justify-end" : "justify-start"}`}>
                     <div
                       className="max-w-[75%] rounded-2xl text-sm overflow-hidden"
                       style={{
-                        background: m.type === "image" || m.type === "file" ? "transparent" : m.from === "me" ? C.ink : C.chip,
-                        color: m.from === "me" ? "#fff" : C.ink,
+                        background: m.type === "image" || m.type === "file" ? "transparent" : mine ? C.ink : C.chip,
+                        color: mine ? "#fff" : C.ink,
                         fontFamily: F,
                         padding: m.type === "image" || m.type === "file" ? 0 : "8px 14px",
-                        borderBottomRightRadius: m.from === "me" ? 4 : 16,
-                        borderBottomLeftRadius: m.from === "me" ? 16 : 4,
+                        borderBottomRightRadius: mine ? 4 : 16,
+                        borderBottomLeftRadius: mine ? 16 : 4,
                       }}
                     >
                       {m.type === "image" ? (
                         <img src={m.url} alt={m.name || "Attachment"} className="max-w-[220px] max-h-[220px] object-cover block" />
                       ) : m.type === "file" ? (
-                        <FileBubble file={m} isMine={m.from === "me"} />
+                        <FileBubble file={m} isMine={mine} />
                       ) : (
                         m.text
                       )}
                     </div>
                   </div>
-                ))
+                  );
+                })
               )}
             </div>
+            {sendError && (
+              <p className="text-xs px-5 py-2" style={{ background: C.brickTint, color: C.brickDark, fontFamily: F }}>{sendError}</p>
+            )}
             <div className="flex items-end gap-1.5 px-4 py-3.5" style={{ borderTop: `1px solid ${C.border}` }}>
               <input
                 ref={fileInputRef}
                 type="file"
                 accept=".pdf,.ppt,.pptx,.doc,.docx,.xls,.xlsx,image/*,.zip,.txt,.csv"
                 hidden
-                onChange={(e) => handleAttachment(e, "file")}
+                onChange={handleAttachment}
               />
               <button
                 onClick={() => setShowCamera(true)}
@@ -949,7 +986,15 @@ function InboxPanel({ threads, activeThreadId, onSelectThread, onSend, onBack })
 
       {showCamera && (
         <CameraModal
-          onCapture={(dataUrl) => { onSend(active.id, { type: "image", url: dataUrl, name: "Photo" }); setShowCamera(false); }}
+          onCapture={(dataUrl) => {
+            setShowCamera(false);
+            // dataURL ~= 1.37x the byte size; refuse anything that would bust the 1 MiB doc cap.
+            if (dataUrl.length * 0.75 > MAX_INLINE_ATTACHMENT_BYTES) {
+              setSendError("That photo is too large to send. Try again from further away or attach a smaller image.");
+              return;
+            }
+            doSend({ type: "image", url: dataUrl, name: "Photo" });
+          }}
           onClose={() => setShowCamera(false)}
         />
       )}
@@ -1027,15 +1072,64 @@ function CameraModal({ onCapture, onClose }) {
    NEED BLOOD flow: pick blood type -> pick location -> donor list
    -> request -> wait for approval -> contact unlocks + chat opens
 ------------------------------------------------------------------ */
-function NeedBloodFlow({ onRequestSent, requests, onOpenThread }) {
-  const [step, setStep] = useState(requests.length > 0 ? "results" : "type"); // "type" | "location" | "results"
-  const [bloodType, setBloodType] = useState(requests[0]?.bloodType || "");
-  const [location, setLocation] = useState(requests[0]?.location || "");
+function NeedBloodFlow({ me, sent, donorSync, onSent, onCancel, onReopen, onOpenThread }) {
+  // step: "type" | "location" | "details" | "results"
+  const [step, setStep] = useState(sent.length > 0 ? "results" : "type");
+  const [bloodType, setBloodType] = useState(sent[0]?.bloodType || "");
+  const [location, setLocation] = useState(sent[0]?.hospital || "");
+  const [coords, setCoords] = useState(sent[0] ? { lat: sent[0].lat, lng: sent[0].lng } : null);
+  const [units, setUnits] = useState(sent[0]?.units || 1);
+  const [urgent, setUrgent] = useState(Boolean(sent[0]?.urgent));
+  const [hospital, setHospital] = useState(sent[0]?.hospital || "");
 
-  const matchingDonors = useMemo(
-    () => MOCK_DONORS.filter((d) => bloodTypeCompatible(bloodType, d.bloodType)).sort((a, b) => a.distanceKm - b.distanceKm),
-    [bloodType]
-  );
+  const [donors, setDonors] = useState([]);
+  const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState("");
+  const [sendingId, setSendingId] = useState(null);
+  const [sendError, setSendError] = useState("");
+
+  // Real donor search — runs whenever the person lands on the results step.
+  useEffect(() => {
+    if (step !== "results" || !bloodType || !coords) return;
+    let cancelled = false;
+    setSearching(true);
+    setSearchError("");
+    findNearbyDonors(bloodType, coords.lat, coords.lng, me.uid)
+      .then((rows) => { if (!cancelled) setDonors(rows); })
+      .catch((e) => { if (!cancelled) setSearchError(e?.message || "Couldn't search for donors."); })
+      .finally(() => { if (!cancelled) setSearching(false); });
+    return () => { cancelled = true; };
+  }, [step, bloodType, coords, me.uid]);
+
+  const sendRequest = async (donor) => {
+    setSendingId(donor.uid);
+    setSendError("");
+    try {
+      await createDonationRequest({
+        requesterUid: me.uid,
+        requesterName: me.name || "Someone",
+        requesterPhone: me.phone,
+        donor,
+        bloodType,
+        units,
+        urgent,
+        hospital: hospital.trim() || location,
+        lat: coords.lat,
+        lng: coords.lng,
+      });
+      onSent?.(donor);
+    } catch (e) {
+      setSendError(
+        e?.code === "permission-denied"
+          ? "You've already sent this donor a request, or it can't be sent right now."
+          : e?.message || "Couldn't send the request. Please try again."
+      );
+    } finally {
+      setSendingId(null);
+    }
+  };
+
+  const matchingDonors = donors;
 
   if (step === "type") {
     return (
@@ -1124,12 +1218,86 @@ function NeedBloodFlow({ onRequestSent, requests, onOpenThread }) {
 
         <div className="flex-1 overflow-y-auto rk-scroll px-6 py-6 sm:px-8 flex flex-col items-center">
           <div className="w-full max-w-xl">
-            <MapPicker value={location} onPick={setLocation} />
+            <MapPicker
+              value={location}
+              initialCoords={coords}
+              onPick={(label, c) => { setLocation(label); if (c) setCoords(c); }}
+            />
+            <button
+              onClick={() => setStep("details")}
+              disabled={!location || !coords}
+              className="mt-6 px-6 py-3 rounded-full text-sm text-white flex items-center gap-1.5 transition-opacity"
+              style={{ background: C.ink, fontFamily: F, fontWeight: 600, opacity: location && coords ? 1 : 0.35 }}
+            >
+              Continue <ChevronRight size={15} />
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (step === "details") {
+    const canGo = hospital.trim().length >= 2 && units >= 1;
+    return (
+      <div className="flex-1 flex flex-col min-h-0">
+        <div className="flex items-center gap-3 px-6 py-4 sm:px-8" style={{ borderBottom: `1px solid ${C.border}` }}>
+          <button
+            onClick={() => setStep("location")}
+            aria-label="Back"
+            className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 transition-colors hover:bg-[#F4F4F5]"
+          >
+            <ArrowLeft size={15} color={C.ink} />
+          </button>
+          <div className="min-w-0 flex-1">
+            <h2 className="text-base font-bold tracking-tight truncate" style={{ color: C.ink, fontFamily: F }}>A few details</h2>
+            <p className="text-xs mt-0.5 truncate" style={{ color: C.sub, fontFamily: F }}>Donors see this when deciding whether to help.</p>
+          </div>
+          <StepDots step="location" />
+        </div>
+
+        <div className="flex-1 overflow-y-auto rk-scroll px-6 py-6 sm:px-8 flex flex-col items-center">
+          <div className="w-full max-w-md flex flex-col gap-5">
+            <div>
+              <label className="block text-[12px] mb-1.5" style={{ color: C.sub, fontFamily: F, fontWeight: 600 }}>Hospital or place where blood is needed</label>
+              <input
+                value={hospital}
+                onChange={(e) => setHospital(e.target.value)}
+                placeholder="e.g. Regency Hospital, Kanpur"
+                className="w-full text-sm px-4 py-3 rounded-xl outline-none"
+                style={{ background: C.chip, color: C.ink, fontFamily: F, border: `1px solid ${C.border}` }}
+              />
+            </div>
+
+            <div>
+              <label className="block text-[12px] mb-1.5" style={{ color: C.sub, fontFamily: F, fontWeight: 600 }}>Units needed</label>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => setUnits((u) => Math.max(1, u - 1))}
+                  aria-label="Fewer units"
+                  className="w-9 h-9 rounded-full text-lg leading-none"
+                  style={{ border: `1px solid ${C.border}`, color: C.ink }}
+                >−</button>
+                <span className="text-base font-bold w-6 text-center" style={{ color: C.ink, fontFamily: F }}>{units}</span>
+                <button
+                  onClick={() => setUnits((u) => Math.min(20, u + 1))}
+                  aria-label="More units"
+                  className="w-9 h-9 rounded-full text-lg leading-none"
+                  style={{ border: `1px solid ${C.border}`, color: C.ink }}
+                >+</button>
+              </div>
+            </div>
+
+            <label className="flex items-center gap-3 cursor-pointer select-none">
+              <input type="checkbox" checked={urgent} onChange={(e) => setUrgent(e.target.checked)} className="w-4 h-4 accent-[#D6303F]" />
+              <span className="text-sm" style={{ color: C.ink, fontFamily: F, fontWeight: 600 }}>This is urgent</span>
+            </label>
+
             <button
               onClick={() => setStep("results")}
-              disabled={!location}
-              className="mt-6 px-6 py-3 rounded-full text-sm text-white flex items-center gap-1.5 transition-opacity"
-              style={{ background: C.ink, fontFamily: F, fontWeight: 600, opacity: location ? 1 : 0.35 }}
+              disabled={!canGo}
+              className="mt-2 px-6 py-3 rounded-full text-sm text-white flex items-center justify-center gap-1.5 transition-opacity"
+              style={{ background: C.ink, fontFamily: F, fontWeight: 600, opacity: canGo ? 1 : 0.35 }}
             >
               Find donors <ChevronRight size={15} />
             </button>
@@ -1146,7 +1314,7 @@ function NeedBloodFlow({ onRequestSent, requests, onOpenThread }) {
         <div>
           <h2 className="text-lg font-bold tracking-tight" style={{ color: C.ink, fontFamily: F }}>Donors near {location || "you"}</h2>
           <p className="text-xs mt-0.5 flex items-center gap-1.5" style={{ color: C.sub, fontFamily: F }}>
-            {matchingDonors.length} {matchingDonors.length === 1 ? "match" : "matches"} for <BloodTypeBadge type={bloodType} /> nearest first
+            {searching ? "Searching…" : `${matchingDonors.length} ${matchingDonors.length === 1 ? "match" : "matches"}`} for <BloodTypeBadge type={bloodType} /> nearest first
           </p>
         </div>
         <button
@@ -1159,17 +1327,28 @@ function NeedBloodFlow({ onRequestSent, requests, onOpenThread }) {
       </div>
 
       <div className="flex-1 overflow-y-auto rk-scroll px-6 py-4 sm:px-8 flex flex-col gap-2.5">
-        {matchingDonors.length === 0 ? (
-          <p className="text-sm text-center py-10" style={{ color: C.sub, fontFamily: F }}>No donors of this type found nearby right now.</p>
+        {sendError && (
+          <p className="text-xs px-4 py-2.5 rounded-xl" style={{ background: C.brickTint, color: C.brickDark, fontFamily: F }}>{sendError}</p>
+        )}
+        {searchError ? (
+          <p className="text-sm text-center py-10" style={{ color: C.brickDark, fontFamily: F }}>{searchError}</p>
+        ) : searching ? (
+          <p className="text-sm text-center py-10" style={{ color: C.sub, fontFamily: F }}>Looking for donors near you…</p>
+        ) : matchingDonors.length === 0 ? (
+          <p className="text-sm text-center py-10" style={{ color: C.sub, fontFamily: F }}>
+            No registered {bloodType} donors within 25 km yet. As more people join, they'll appear here.
+          </p>
         ) : (
           matchingDonors.map((d) => {
-            const existing = requests.find((r) => r.donorId === d.id);
+            const existing = sent.find((r) => r.donorUid === d.uid);
             return (
               <DonorCard
-                key={d.id}
+                key={d.uid}
                 donor={d}
                 request={existing}
-                onRequest={() => onRequestSent(d)}
+                sending={sendingId === d.uid}
+                onRequest={() => (existing?.status === "cancelled" ? onReopen(existing) : sendRequest(d))}
+                onCancel={() => existing && onCancel(existing)}
                 onOpenChat={() => existing?.threadId && onOpenThread(existing.threadId)}
               />
             );
@@ -1180,9 +1359,28 @@ function NeedBloodFlow({ onRequestSent, requests, onOpenThread }) {
   );
 }
 
-function DonorCard({ donor, request, onRequest, onOpenChat }) {
-  const initials = donor.name.split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase();
-  const status = request?.status; // undefined | "pending" | "approved"
+/* Fetches the OTHER person's phone once a request is approved. Rules only allow
+   this read when the request between the two is approved, so it is never exposed
+   early, and it works the same for donor and requester. */
+function useApprovedPhone(requestId, otherUid, approved) {
+  const [phone, setPhone] = useState(null);
+  useEffect(() => {
+    if (!approved || !requestId || !otherUid) { setPhone(null); return; }
+    let cancelled = false;
+    getContactPhone(requestId, otherUid).then((p) => { if (!cancelled) setPhone(p); });
+    return () => { cancelled = true; };
+  }, [requestId, otherUid, approved]);
+  return phone;
+}
+
+function DonorCard({ donor, request, sending, onRequest, onCancel, onOpenChat }) {
+  const initials = (donor.name || "?").split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase();
+  const status = request?.status; // undefined | "pending" | "approved" | "declined" | "cancelled"
+  // Never-requested donors, or ones whose request the person cancelled earlier
+  // (that re-opens the same request). A declined donor is final.
+  const canRequest = !status || status === "cancelled";
+  const phone = useApprovedPhone(request?.id, donor.uid, status === "approved");
+  const km = typeof donor.distanceKm === "number" ? donor.distanceKm.toFixed(1) : donor.distanceKm;
 
   return (
     <div
@@ -1193,46 +1391,53 @@ function DonorCard({ donor, request, onRequest, onOpenChat }) {
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5 flex-wrap">
           <span className="text-sm font-semibold" style={{ color: C.ink, fontFamily: F }}>{donor.name}</span>
-          {donor.verified && (
-            <Tooltip label="Verified donor">
-              <ShieldCheck size={13} color={C.brick} />
-            </Tooltip>
-          )}
           <BloodTypeBadge type={donor.bloodType} />
         </div>
         <div className="flex items-center gap-2.5 mt-1 flex-wrap">
           <span className="text-xs flex items-center gap-1" style={{ color: C.sub, fontFamily: F }}>
-            <MapPin size={11} /> {donor.distanceKm} km away
+            <MapPin size={11} /> {km} km away{donor.city ? ` · ${donor.city}` : ""}
           </span>
-          <span className="text-xs" style={{ color: C.faint, fontFamily: F }}>Last donated {donor.lastDonation}</span>
         </div>
-        {/* Contact info intentionally hidden until a donor approves a
-            request — this mock only unlocks a thread + call once
-            "approved", never before. */}
+        {/* Contact info stays hidden until the donor approves. */}
         {status === "approved" && (
           <p className="text-[11px] mt-1 flex items-center gap-1" style={{ color: C.forest, fontFamily: F, fontWeight: 600 }}>
-            <Check size={11} /> Approved — you can now message or call {donor.name.split(" ")[0]}
+            <Check size={11} /> Approved — you can now message or call {(donor.name || "them").split(" ")[0]}
+          </p>
+        )}
+        {status === "declined" && (
+          <p className="text-[11px] mt-1" style={{ color: C.sub, fontFamily: F, fontWeight: 600 }}>
+            This donor can't help right now.
           </p>
         )}
       </div>
 
-      {!status && (
+      {canRequest && (
         <button
           onClick={onRequest}
-          className="shrink-0 text-xs px-3.5 py-2 rounded-full text-white transition-opacity hover:opacity-85"
+          disabled={sending}
+          className="shrink-0 text-xs px-3.5 py-2 rounded-full text-white transition-opacity hover:opacity-85 disabled:opacity-50"
           style={{ background: C.brick, fontFamily: F, fontWeight: 700 }}
         >
-          Request
+          {sending ? "Sending…" : "Request"}
         </button>
       )}
       {status === "pending" && (
-        <span className="shrink-0 flex items-center gap-1.5 text-xs px-3 py-2 rounded-full" style={{ background: C.chip, color: C.sub, fontFamily: F, fontWeight: 600 }}>
-          <Clock size={12} /> Waiting
-        </span>
+        <div className="shrink-0 flex items-center gap-2">
+          <span className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-full" style={{ background: C.chip, color: C.sub, fontFamily: F, fontWeight: 600 }}>
+            <Clock size={12} /> Waiting
+          </span>
+          <button
+            onClick={onCancel}
+            className="text-[11px] px-2.5 py-2 rounded-full transition-colors hover:bg-[#F4F4F5]"
+            style={{ color: C.sub, fontFamily: F, fontWeight: 600 }}
+          >
+            Cancel
+          </button>
+        </div>
       )}
       {status === "approved" && (
         <div className="shrink-0 flex items-center gap-2">
-          <CallButton phone={donor.phone} name={donor.name} />
+          {phone && <CallButton phone={phone} name={donor.name || "Donor"} />}
           <button
             onClick={onOpenChat}
             className="flex items-center gap-1.5 text-xs px-3.5 py-2 rounded-full transition-colors hover:bg-[#F4F4F5]"
@@ -1250,27 +1455,147 @@ function DonorCard({ donor, request, onRequest, onOpenChat }) {
    DONATE BLOOD flow: nearby requesters list + a map view, with
    approve/decline. Also drives the inbox thread once approved.
 ------------------------------------------------------------------ */
-function DonateBloodFlow({ incoming, onApprove, onDecline, onOpenThread }) {
+function IncomingRequestCard({ r, distanceKm, onApprove, onDecline, onOpenThread, onShowMap, mapOpen, busy }) {
+  const initials = (r.requesterName || "?").split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase();
+  const phone = useApprovedPhone(r.id, r.requesterUid, r.status === "approved");
+
+  return (
+    <div
+      className="rounded-2xl transition-shadow overflow-hidden"
+      style={{ border: `1px solid ${C.border}`, background: "#fff", boxShadow: "0 1px 2px rgba(0,0,0,0.02)" }}
+    >
+      <div className="flex items-center gap-3.5 px-5 py-5">
+        <Avatar initials={initials} size={46} tone={C.sky} />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="text-sm font-semibold" style={{ color: C.ink, fontFamily: F }}>{r.requesterName}</span>
+            <BloodTypeBadge type={r.bloodType} />
+            {r.urgent && <Pill tone="urgent">Urgent</Pill>}
+          </div>
+          <div className="flex items-center gap-2.5 mt-1.5 flex-wrap">
+            <span className="text-xs flex items-center gap-1" style={{ color: C.sub, fontFamily: F }}>
+              <MapPin size={11} /> {distanceKm != null ? `${distanceKm.toFixed(1)} km · ` : ""}{r.hospital}
+            </span>
+            <span className="text-xs" style={{ color: C.faint, fontFamily: F }}>{r.units} unit{r.units > 1 ? "s" : ""} needed</span>
+            <span className="text-xs" style={{ color: C.faint, fontFamily: F }}>{timeAgo(r.createdAt)}</span>
+          </div>
+        </div>
+        <button
+          onClick={onShowMap}
+          aria-label="View on map"
+          className="shrink-0 w-9 h-9 rounded-full flex items-center justify-center transition-colors"
+          style={{ background: mapOpen ? C.chip : "transparent" }}
+        >
+          <MapPin size={15} color={C.sub} />
+        </button>
+      </div>
+
+      <div className="flex items-center gap-2.5 px-5 py-4 min-h-[56px] rounded-b-2xl" style={{ borderTop: `1px solid ${C.border}`, background: C.sidebar }}>
+        {r.status === "approved" ? (
+          <div className="flex items-center gap-2 w-full">
+            <span className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full" style={{ background: C.mint, color: C.forest, fontFamily: F, fontWeight: 700 }}>
+              <Check size={12} /> Approved
+            </span>
+            <div className="ml-auto flex items-center gap-2">
+              {phone && <CallButton phone={phone} name={r.requesterName || "Requester"} />}
+              <button
+                onClick={() => onOpenThread(r.threadId)}
+                className="flex items-center gap-1.5 text-xs px-3.5 py-2 rounded-full transition-colors hover:bg-white"
+                style={{ border: `1px solid ${C.border}`, color: C.ink, fontFamily: F, fontWeight: 700 }}
+              >
+                <MessageCircle size={13} /> Message
+              </button>
+            </div>
+          </div>
+        ) : r.status === "declined" ? (
+          <span className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full" style={{ background: C.chip, color: C.sub, fontFamily: F, fontWeight: 600 }}>
+            <X size={12} /> Declined
+          </span>
+        ) : r.status === "cancelled" ? (
+          <span className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full" style={{ background: C.chip, color: C.sub, fontFamily: F, fontWeight: 600 }}>
+            <X size={12} /> Withdrawn by requester
+          </span>
+        ) : (
+          <div className="flex items-center justify-end gap-2.5 w-full">
+            <button
+              onClick={onDecline}
+              disabled={busy}
+              className="shrink-0 text-xs px-4 py-2 rounded-full transition-colors hover:bg-white disabled:opacity-50"
+              style={{ border: `1px solid ${C.border}`, color: C.sub, fontFamily: F, fontWeight: 700 }}
+            >
+              Decline
+            </button>
+            <button
+              onClick={onApprove}
+              disabled={busy}
+              className="shrink-0 text-xs px-4 py-2 rounded-full text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+              style={{ background: C.brick, fontFamily: F, fontWeight: 700, boxShadow: "0 10px 20px -10px rgba(214,48,63,0.55)" }}
+            >
+              {busy ? "Saving…" : "Approve"}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function DonateBloodFlow({ me, incoming, donorSync, onApprove, onDecline, onOpenThread }) {
   const [showMapFor, setShowMapFor] = useState(null); // request id
+  const [busyId, setBusyId] = useState(null);
+  const [actionError, setActionError] = useState("");
 
-  const pendingCount = incoming.filter((r) => !r.status).length;
-  const urgentCount = incoming.filter((r) => !r.status && r.urgent).length;
+  const myPos = donorSync.status === "ready" ? { lat: donorSync.lat, lng: donorSync.lng } : null;
+  const distanceOf = (r) => (myPos ? haversineKm(myPos.lat, myPos.lng, r.lat, r.lng) : null);
 
-  // Sort requests: Urgent first, then by closest distance
-  const sortedIncoming = [...incoming].sort((a, b) => {
-    if (a.urgent === b.urgent) {
-      return a.distanceKm - b.distanceKm;
-    }
-    return a.urgent ? -1 : 1;
+  // Everything in `incoming` is already addressed to this donor (the query and
+  // the security rules both enforce that). Withdrawn requests stay visible with
+  // a "Withdrawn" label so a notification never points at something that vanished.
+  const visible = incoming;
+
+  const pendingCount = visible.filter((r) => r.status === "pending").length;
+  const urgentCount = visible.filter((r) => r.status === "pending" && r.urgent).length;
+
+  // Pending first, then urgent, then closest, then newest.
+  const sorted = [...visible].sort((a, b) => {
+    const rank = (r) => (r.status === "pending" ? 0 : 1);
+    if (rank(a) !== rank(b)) return rank(a) - rank(b);
+    if (a.urgent !== b.urgent) return a.urgent ? -1 : 1;
+    const da = distanceOf(a), db2 = distanceOf(b);
+    if (da != null && db2 != null && da !== db2) return da - db2;
+    return b.createdAt - a.createdAt;
   });
+
+  const run = async (id, fn) => {
+    setBusyId(id);
+    setActionError("");
+    try {
+      await fn();
+    } catch (e) {
+      setActionError(e?.message || "That didn't go through. Please try again.");
+    } finally {
+      setBusyId(null);
+    }
+  };
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
       <div className="px-6 py-5 sm:px-8" style={{ borderBottom: `1px solid ${C.border}` }}>
-        <h2 className="text-lg font-bold tracking-tight" style={{ color: C.ink, fontFamily: F }}>Requests near you</h2>
-        <p className="text-xs mt-0.5" style={{ color: C.sub, fontFamily: F }}>People who need your blood type, urgent and closest first.</p>
+        <h2 className="text-lg font-bold tracking-tight" style={{ color: C.ink, fontFamily: F }}>Requests for you</h2>
+        <p className="text-xs mt-0.5" style={{ color: C.sub, fontFamily: F }}>
+          People who asked you to donate {me.bloodType || "blood"}. Pending, urgent and closest first.
+        </p>
 
-        {incoming.length > 0 && (
+        {donorSync.status === "syncing" && (
+          <p className="text-[11.5px] mt-3" style={{ color: C.sub, fontFamily: F }}>Publishing your donor profile…</p>
+        )}
+        {donorSync.status === "error" && (
+          <p className="text-[11.5px] mt-3 px-3 py-2 rounded-xl" style={{ background: C.brickTint, color: C.brickDark, fontFamily: F }}>
+            You're not listed as a donor yet. {donorSync.reason}
+          </p>
+        )}
+
+        {visible.length > 0 && (
           <div className="flex items-center gap-2 mt-3.5">
             <span className="px-3 py-1.5 rounded-full text-[11.5px] font-bold" style={{ background: C.chip, color: C.ink, fontFamily: F }}>
               {pendingCount} pending
@@ -1285,84 +1610,27 @@ function DonateBloodFlow({ incoming, onApprove, onDecline, onOpenThread }) {
       </div>
 
       <div className="flex-1 overflow-y-auto rk-scroll px-6 py-4 sm:px-8 flex flex-col gap-3">
-        {sortedIncoming.length === 0 ? (
-          <p className="text-sm text-center py-10" style={{ color: C.sub, fontFamily: F }}>No pending requests right now — you'll be notified when one comes in.</p>
+        {actionError && (
+          <p className="text-xs px-4 py-2.5 rounded-xl" style={{ background: C.brickTint, color: C.brickDark, fontFamily: F }}>{actionError}</p>
+        )}
+        {sorted.length === 0 ? (
+          <p className="text-sm text-center py-10" style={{ color: C.sub, fontFamily: F }}>
+            No requests yet. When someone asks you to donate, it appears here instantly.
+          </p>
         ) : (
-          sortedIncoming.map((r) => {
-            const initials = r.name.split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase();
-            return (
-              <div
-                  className="rounded-2xl transition-shadow overflow-hidden"
-                  style={{ border: `1px solid ${C.border}`, background: "#fff", boxShadow: "0 1px 2px rgba(0,0,0,0.02)" }}
-                >
-                <div className="flex items-center gap-3.5 px-5 py-5">
-                  <Avatar initials={initials} size={46} tone={C.sky} />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <span className="text-sm font-semibold" style={{ color: C.ink, fontFamily: F }}>{r.name}</span>
-                      <BloodTypeBadge type={r.bloodType} />
-                      {r.urgent && <Pill tone="urgent">Urgent</Pill>}
-                    </div>
-                    <div className="flex items-center gap-2.5 mt-1.5 flex-wrap">
-                      <span className="text-xs flex items-center gap-1" style={{ color: C.sub, fontFamily: F }}>
-                        <MapPin size={11} /> {r.distanceKm} km · {r.hospital}
-                      </span>
-                      <span className="text-xs" style={{ color: C.faint, fontFamily: F }}>{r.units} unit{r.units > 1 ? "s" : ""} needed</span>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => setShowMapFor(showMapFor === r.id ? null : r.id)}
-                    aria-label="View on map"
-                    className="shrink-0 w-9 h-9 rounded-full flex items-center justify-center transition-colors"
-                    style={{ background: showMapFor === r.id ? C.chip : "transparent" }}
-                  >
-                    <MapPin size={15} color={C.sub} />
-                  </button>
-                </div>
-
-                <div className="flex items-center gap-2.5 px-5 py-4 min-h-[56px] rounded-b-2xl" style={{ borderTop: `1px solid ${C.border}`, background: C.sidebar }}>
-                  {r.status === "approved" ? (
-                    <div className="flex items-center gap-2 w-full">
-                      <span className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full" style={{ background: C.mint, color: C.forest, fontFamily: F, fontWeight: 700 }}>
-                        <Check size={12} /> Approved
-                      </span>
-                      <div className="ml-auto flex items-center gap-2">
-                        <CallButton phone={r.phone} name={r.name} />
-                        <button
-                          onClick={() => onOpenThread(r.threadId)}
-                          className="flex items-center gap-1.5 text-xs px-3.5 py-2 rounded-full transition-colors hover:bg-white"
-                          style={{ border: `1px solid ${C.border}`, color: C.ink, fontFamily: F, fontWeight: 700 }}
-                        >
-                          <MessageCircle size={13} /> Message
-                        </button>
-                      </div>
-                    </div>
-                  ) : r.status === "declined" ? (
-                    <span className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full" style={{ background: C.chip, color: C.sub, fontFamily: F, fontWeight: 600 }}>
-                      <X size={12} /> Declined
-                    </span>
-                  ) : (
-                    <div className="flex items-center justify-end gap-2.5 w-full">
-                      <button
-                        onClick={() => onDecline(r.id)}
-                        className="shrink-0 text-xs px-4 py-2 rounded-full transition-colors hover:bg-white"
-                        style={{ border: `1px solid ${C.border}`, color: C.sub, fontFamily: F, fontWeight: 700 }}
-                      >
-                        Decline
-                      </button>
-                      <button
-                        onClick={() => onApprove(r.id)}
-                        className="shrink-0 text-xs px-4 py-2 rounded-full text-white transition-opacity hover:opacity-90"
-                        style={{ background: C.brick, fontFamily: F, fontWeight: 700, boxShadow: "0 10px 20px -10px rgba(214,48,63,0.55)" }}
-                      >
-                        Approve
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </div>
-            );
-          })
+          sorted.map((r) => (
+            <IncomingRequestCard
+              key={r.id}
+              r={r}
+              distanceKm={distanceOf(r)}
+              busy={busyId === r.id}
+              mapOpen={showMapFor === r.id}
+              onShowMap={() => setShowMapFor(showMapFor === r.id ? null : r.id)}
+              onApprove={() => run(r.id, () => onApprove(r))}
+              onDecline={() => run(r.id, () => onDecline(r))}
+              onOpenThread={onOpenThread}
+            />
+          ))
         )}
       </div>
 
@@ -1373,6 +1641,7 @@ function DonateBloodFlow({ incoming, onApprove, onDecline, onOpenThread }) {
           <MapModal
             label={activeRequest.hospital}
             value={activeRequest.hospital}
+            initialCoords={{ lat: activeRequest.lat, lng: activeRequest.lng }}
             onPick={() => {}}
             onClose={() => setShowMapFor(null)}
           />
@@ -1527,8 +1796,20 @@ function SignedOut() {
 /* ---------------------------------------------------------------
    Root
 ------------------------------------------------------------------ */
+// useSearchParams() opts the page out of static rendering unless it is inside
+// a Suspense boundary, so the real page body lives in ActionPageInner and this
+// default export just supplies the boundary.
 export default function ActionPage() {
+  return (
+    <Suspense fallback={null}>
+      <ActionPageInner />
+    </Suspense>
+  );
+}
+
+function ActionPageInner() {
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   // Real signed-in identity: Firebase Auth for the uid/session, Firestore
   // ("users/{uid}") for the profile fields this page reads (name,
@@ -1557,86 +1838,26 @@ export default function ActionPage() {
     };
   }, [authLoading, authUser]);
 
-  const [mode, setMode] = useState(null); // null (blank picker) | "need" | "donate"
-  const [view, setView] = useState("main"); // "main" | "inbox"
-
-  // ---- Need-blood side state: requests the signed-in user has sent out ----
-  const [sentRequests, setSentRequests] = useState([]); // { donorId, status: "pending"|"approved", threadId, location, bloodType }
-
-  // ---- Donate side state: incoming requests to the signed-in user as donor ----
-  const [incomingRequests, setIncomingRequests] = useState(
-    MOCK_REQUESTS.map((r) => ({ ...r, status: undefined, threadId: null }))
+  // Deep-linked from the retired /request and /donor/signup pages
+  // (?mode=need / ?mode=donate), or opened fresh from the picker.
+  const initialMode = searchParams.get("mode");
+  const [mode, setMode] = useState(
+    initialMode === "need" || initialMode === "donate" ? initialMode : null
   );
-
-  // ---- Notifications (shared bell) ----
-  const [notifications, setNotifications] = useState([]);
-
-  // ---- Inbox threads (shared, keyed by id) ----
-  const [threads, setThreads] = useState([]);
+  const [view, setView] = useState("main"); // "main" | "inbox"
   const [activeThreadId, setActiveThreadId] = useState(null);
+
+  // Profile completeness is derived here (before the early returns below) so
+  // the backend hook can run unconditionally, as hooks must.
+  const profileComplete = getMissingProfileFields(user).length === 0;
+
+  // Everything live: donor publishing, sent/incoming requests, threads, notifications.
+  const backend = useRequestsBackend(user, profileComplete);
 
   if (authLoading || profileLoading) return null; // brief flash while Firebase resolves the session
   if (!user) return <SignedOut />;
 
   const missingProfileFields = getMissingProfileFields(user);
-  const profileComplete = missingProfileFields.length === 0;
-
-  const pushNotification = (title, body, tone = "info") => {
-    setNotifications((prev) => [
-      { id: `n${Date.now()}`, title, body, tone, read: false, time: "Just now" },
-      ...prev,
-    ]);
-  };
-
-  const openOrCreateThread = (withName, withInitials, context, phone) => {
-    const id = `t-${withName.replace(/\s+/g, "-").toLowerCase()}`;
-    setThreads((prev) => {
-      if (prev.some((t) => t.id === id)) return prev;
-      return [...prev, { id, withName, withInitials, context, phone, unread: false, messages: [] }];
-    });
-    return id;
-  };
-
-  // --- Need Blood: sending a request to a mock donor ---
-  const handleRequestSent = (donor) => {
-    setSentRequests((prev) => {
-      if (prev.some((r) => r.donorId === donor.id)) return prev;
-      return [...prev, { donorId: donor.id, status: "pending", threadId: null, bloodType: donor.bloodType, location: donor.city }];
-    });
-    pushNotification("Request sent", `You asked ${donor.name} for ${donor.bloodType} blood. We'll notify you when they respond.`);
-
-    // Simulated donor response after a short delay — this is a UI demo of
-    // the approval flow, not a real notification round-trip.
-    setTimeout(() => {
-      const initials = donor.name.split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase();
-      const threadId = openOrCreateThread(donor.name, initials, `${donor.bloodType} donor · ${donor.distanceKm} km away`, donor.phone);
-      setSentRequests((prev) => prev.map((r) => (r.donorId === donor.id ? { ...r, status: "approved", threadId } : r)));
-      pushNotification(`${donor.name} approved your request`, "You can now message or call them directly.", "success");
-    }, 2600);
-  };
-
-  // --- Donate Blood: approving/declining an incoming request ---
-  const handleApprove = (requestId) => {
-    setIncomingRequests((prev) =>
-      prev.map((r) => {
-        if (r.id !== requestId) return r;
-        const initials = r.name.split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase();
-        const threadId = openOrCreateThread(r.name, initials, `Needs ${r.bloodType} · ${r.hospital}`, r.phone);
-        pushNotification("Request approved", `You approved ${r.name}'s request. You can message or call them now.`, "success");
-        return { ...r, status: "approved", threadId };
-      })
-    );
-  };
-
-  const handleDecline = (requestId) => {
-    setIncomingRequests((prev) => prev.map((r) => (r.id === requestId ? { ...r, status: "declined" } : r)));
-  };
-
-  const handleSendMessage = (threadId, payload) => {
-    setThreads((prev) =>
-      prev.map((t) => (t.id === threadId ? { ...t, messages: [...t.messages, { from: "me", ...payload }] } : t))
-    );
-  };
 
   const handleOpenThread = (threadId) => {
     if (!threadId) return;
@@ -1644,13 +1865,11 @@ export default function ActionPage() {
     setView("inbox");
   };
 
-  const markAllRead = () => setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
-
   const initials = user.name?.trim()
     ? user.name.trim().split(/\s+/).slice(0, 2).map((p) => p[0]?.toUpperCase()).join("")
     : "?";
 
-  const inboxUnreadCount = threads.filter((t) => t.unread).length;
+  const inboxUnreadCount = backend.threads.filter((t) => (t.unread?.[user.uid] || 0) > 0).length;
 
   const SIDEBAR_NAV = [
     { key: "need", label: "Need Blood", icon: Droplet },
@@ -1753,7 +1972,7 @@ export default function ActionPage() {
           <div className="hidden sm:block" />
 
           <div className="flex items-center gap-3">
-            <NotificationBell notifications={notifications} onMarkAllRead={markAllRead} />
+            <NotificationBell notifications={backend.notifications} ready={backend.notificationsReady} onMarkAllRead={backend.markAllRead} />
             <button
               onClick={() => router.push("/profile")}
               aria-label="Your profile"
@@ -1792,10 +2011,12 @@ export default function ActionPage() {
         {/* Body */}
         {view === "inbox" ? (
           <InboxPanel
-            threads={threads}
+            me={user}
+            threads={backend.threads}
             activeThreadId={activeThreadId}
             onSelectThread={setActiveThreadId}
-            onSend={handleSendMessage}
+            onSend={backend.send}
+            onMarkRead={backend.markRead}
             onBack={() => setActiveThreadId(null)}
           />
         ) : (mode === "need" || mode === "donate") && !profileComplete ? (
@@ -1805,15 +2026,20 @@ export default function ActionPage() {
           />
         ) : mode === "need" ? (
           <NeedBloodFlow
-            onRequestSent={handleRequestSent}
-            requests={sentRequests}
+            me={user}
+            sent={backend.sent}
+            donorSync={backend.donorSync}
+            onCancel={backend.cancel}
+            onReopen={backend.reopen}
             onOpenThread={handleOpenThread}
           />
         ) : mode === "donate" ? (
           <DonateBloodFlow
-            incoming={incomingRequests}
-            onApprove={handleApprove}
-            onDecline={handleDecline}
+            me={user}
+            incoming={backend.incoming}
+            donorSync={backend.donorSync}
+            onApprove={backend.approve}
+            onDecline={backend.decline}
             onOpenThread={handleOpenThread}
           />
         ) : (

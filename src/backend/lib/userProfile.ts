@@ -6,10 +6,11 @@
    This holds the account/profile fields the new AuthPage/ProfilePage
    designs collect (name, dob, email, address, bloodType, phone,
    secondary emails, etc). It is intentionally separate from the
-   "donors" collection in src/lib/matching.ts: "donors" is the
-   geohash-indexed collection used for nearby-donor search (it needs
-   phone + lat/lng, captured today by /donor/signup), while "users"
-   is just the account profile every signed-in person has.
+   "donors" collection in src/backend/lib/requests.ts: "donors" is the
+   geohash-indexed collection used for nearby-donor search, kept in
+   sync with this profile automatically (see syncDonorFromProfile)
+   whenever it's complete, while "users" is the account profile every
+   signed-in person has.
 -------------------------------------------------------------------- */
 
 import {
