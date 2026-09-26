@@ -150,7 +150,7 @@ export default function LocationMap({ value, onChange, height = 320, className =
     navigator.geolocation.getCurrentPosition(
       (position) => {
         setLocating(false);
-        onChange({ lat: position.coords.latitude, lng: position.coords.longitude }, "Current location");
+        onChange?.({ lat: position.coords.latitude, lng: position.coords.longitude }, "Current location");
       },
       () => {
         setLocating(false);
