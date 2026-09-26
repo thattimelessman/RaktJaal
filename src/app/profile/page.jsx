@@ -2381,7 +2381,11 @@ export default function ProfilePage() {
 
                               </div>
                             ) : (
-                              <span className="text-sm italic" style={{ color: C.sub, fontFamily: F }}>
+                              <span
+                                className="text-sm italic cursor-pointer hover:underline transition-colors"
+                                style={{ color: C.sub, fontFamily: F }}
+                                onClick={() => setEditingKey("phone")}
+                              >
                                 No phone number
                               </span>
                             )}
@@ -2402,7 +2406,11 @@ export default function ProfilePage() {
                                 {formatAddress(address)}
                               </span>
                             ) : (
-                              <span className="text-sm italic" style={{ color: C.sub, fontFamily: F }}>
+                              <span
+                                className="text-sm italic cursor-pointer hover:underline transition-colors"
+                                style={{ color: C.sub, fontFamily: F }}
+                                onClick={() => setEditingKey("address")}
+                              >
                                 No address added
                               </span>
                             )}
