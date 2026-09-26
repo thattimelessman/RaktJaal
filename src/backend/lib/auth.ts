@@ -5,7 +5,12 @@ import {
   signOut,
   sendPasswordResetEmail,
   updateProfile,
+  linkWithCredential,
+  reauthenticateWithCredential,
+  updatePassword,
+  EmailAuthProvider,
   type UserCredential,
+  type User,
 } from "firebase/auth";
 import { auth, googleProvider } from "@/backend/lib/firebase";
 
@@ -57,6 +62,10 @@ function friendlyAuthError(err: unknown): string {
       return "Your browser blocked the Google sign-in popup. Please allow popups and try again.";
     case "auth/account-exists-with-different-credential":
       return "An account already exists with this email using a different sign-in method.";
+    case "auth/requires-recent-login":
+      return "For security, please sign in again before setting a password.";
+    case "auth/credential-already-in-use":
+      return "That email is already linked to a different account.";
     default:
       return "Something went wrong. Please try again.";
   }
@@ -174,4 +183,48 @@ export async function resetPassword(email: string): Promise<void> {
 
 export async function signOutUser(): Promise<void> {
   await signOut(auth);
+}
+
+/** True once this account has a password credential linked — false for a
+ *  Google-only account that has never set one. */
+export function hasPasswordProvider(user: User | null | undefined): boolean {
+  if (!user) return false;
+  return user.providerData.some((p) => p.providerId === "password");
+}
+
+/**
+ * Adds a password credential to the current (Google-only) account, so the
+ * person can also sign in with email + password from a device or browser
+ * where they aren't already signed into Google. Does not touch or remove
+ * the existing Google sign-in method.
+ */
+export async function setPasswordForGoogleAccount(password: string): Promise<void> {
+  const user = auth.currentUser;
+  if (!user || !user.email) throw new Error("No signed-in account found.");
+  if (hasPasswordProvider(user)) throw new Error("This account already has a password set.");
+  try {
+    const credential = EmailAuthProvider.credential(user.email, password);
+    await linkWithCredential(user, credential);
+    await user.reload();
+  } catch (err) {
+    throw new Error(friendlyAuthError(err));
+  }
+}
+
+/**
+ * Changes the password on an account that already has one. Firebase
+ * requires a recent sign-in before it will allow updatePassword, so this
+ * re-authenticates with the current password first — same pattern as
+ * every "change password" flow that asks for your current one.
+ */
+export async function changeAccountPassword(currentPassword: string, newPassword: string): Promise<void> {
+  const user = auth.currentUser;
+  if (!user || !user.email) throw new Error("No signed-in account found.");
+  try {
+    const credential = EmailAuthProvider.credential(user.email, currentPassword);
+    await reauthenticateWithCredential(user, credential);
+    await updatePassword(user, newPassword);
+  } catch (err) {
+    throw new Error(friendlyAuthError(err));
+  }
 }

@@ -25,6 +25,12 @@ interface AuthContextValue {
   pendingTwoFactorUser: User | null;
   /** Called once the login page confirms the OTP — releases `user`. */
   completeTwoFactor: () => void;
+  /** Re-reads auth.currentUser and pushes a fresh object into `user` state.
+   *  Needed after linkWithCredential (e.g. setting a password): Firebase
+   *  does NOT refire onAuthStateChanged for that, so without this, `user`
+   *  keeps pointing at the pre-link snapshot and providerData looks stale
+   *  everywhere (Security tab still saying "No password set"). */
+  refreshUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue>({
@@ -32,6 +38,7 @@ const AuthContext = createContext<AuthContextValue>({
   loading: true,
   pendingTwoFactorUser: null,
   completeTwoFactor: () => {},
+  refreshUser: async () => {},
 });
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -45,6 +52,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (u) => {
+      // Mark resolving true for the *whole* duration of this callback, not
+      // just the very first one — a later re-fire (fresh sign-in, sign-out
+      // then sign-in again) also has an async Firestore check in the
+      // middle, and pages gate on `loading` to avoid rendering a
+      // signed-out state while that's still in flight.
+      setLoading(true);
       if (!u) {
         setUser(null);
         setPendingTwoFactorUser(null);
@@ -89,8 +102,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setPendingTwoFactorUser(null);
   };
 
+  const refreshUser = async () => {
+    const u = auth.currentUser;
+    if (!u) return;
+    await u.reload();
+    // auth.currentUser is the SAME object reload() just mutated, so assign a
+    // fresh reference or React won't see any change and skip the re-render.
+    setUser(Object.assign(Object.create(Object.getPrototypeOf(u)), u));
+  };
+
   return (
-    <AuthContext.Provider value={{ user, loading, pendingTwoFactorUser, completeTwoFactor }}>
+    <AuthContext.Provider value={{ user, loading, pendingTwoFactorUser, completeTwoFactor, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );

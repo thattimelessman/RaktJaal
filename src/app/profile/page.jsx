@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/frontend/hooks/useAuth";
-import { signOutUser, sendEmailOtp, verifyEmailOtpCode, deleteAccountWithEmailOtp } from "@/backend/lib/auth";
+import { signOutUser, sendEmailOtp, verifyEmailOtpCode, deleteAccountWithEmailOtp, hasPasswordProvider, setPasswordForGoogleAccount, changeAccountPassword } from "@/backend/lib/auth";
 import { getUserProfile, updateUserProfile } from "@/backend/lib/userProfile";
 import {
   Droplet,
@@ -27,7 +27,9 @@ import {
   Camera,
   RotateCcw,
   Loader2,
-  CalendarDays
+  CalendarDays,
+  Eye,
+  EyeOff
 } from "lucide-react";
 
 /* ---------------------------------------------------------------
@@ -1137,10 +1139,215 @@ function CodeConfirmDelete({ onConfirm, onCancel }) {
 }
 
 /**
- * Two-step verification setup. Sends a real 6-digit OTP to the account's
- * email via the same /api/email-otp/send + /api/email-otp/verify backend
- * used for account deletion (purpose "twofactor"), and only flips the
- * enabled flag once that code is confirmed server-side.
+ * Password row for the Security tab. Google-signed-up accounts have no
+ * password credential until one is explicitly set (see setPasswordForGoogleAccount
+ * in backend/lib/auth.ts) — without one, signing in from a device/browser
+ * that isn't already signed into Google is a dead end. This shows a plain
+ * "Password set" state once one exists, and an inline set-password form
+ * (mirroring the one shown right after Google sign-up) if it's still missing.
+ */
+function passwordStrengthChecks(pw) {
+  return {
+    length: pw.length >= 8,
+    upper: /[A-Z]/.test(pw),
+    number: /[0-9]/.test(pw),
+    symbol: /[^A-Za-z0-9]/.test(pw),
+  };
+}
+
+function PasswordSetupRow({ hasPassword, onPasswordSet, refreshUser }) {
+  const [settingUp, setSettingUp] = useState(false);
+  const [changing, setChanging] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [showPw, setShowPw] = useState(false);
+  const [showCurrentPw, setShowCurrentPw] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
+
+  const checks = passwordStrengthChecks(password);
+  const strong = checks.length && checks.upper && checks.number && checks.symbol;
+  const matches = confirm.length > 0 && confirm === password;
+  const canSubmit = strong && matches && (!changing || currentPassword.length > 0);
+
+  const reset = () => {
+    setSettingUp(false);
+    setChanging(false);
+    setCurrentPassword("");
+    setPassword("");
+    setConfirm("");
+    setShowPw(false);
+    setShowCurrentPw(false);
+    setError("");
+  };
+
+  const submit = async () => {
+    if (!canSubmit) return;
+    setSubmitting(true);
+    setError("");
+    try {
+      if (changing) {
+        await changeAccountPassword(currentPassword, password);
+      } else {
+        await setPasswordForGoogleAccount(password);
+      }
+      await refreshUser?.();
+      reset();
+      onPasswordSet?.();
+    } catch (err) {
+      setError(err?.message || "Could not update the password. Please try again.");
+      setSubmitting(false);
+    }
+  };
+
+  if (hasPassword && !changing) {
+    return (
+      <RowItem
+        left={
+          <div className="flex items-center gap-2">
+            <KeyRound size={13} color={C.sub} />
+            <span className="text-sm" style={{ color: C.ink, fontFamily: F, fontWeight: 500 }}>
+              Password set
+            </span>
+          </div>
+        }
+        right={<KebabMenu items={[{ label: "Change password", onClick: () => setChanging(true) }]} />}
+      />
+    );
+  }
+
+  if (!hasPassword && !settingUp) {
+    return (
+      <div>
+        <div className="flex items-start gap-3 rounded-xl p-3.5" style={{ background: "#FFF8ED", border: "1px solid #FBE4C0" }}>
+          <div className="w-7 h-7 rounded-full flex items-center justify-center shrink-0" style={{ background: "#FCEAD1" }}>
+            <AlertCircle size={14} color="#9A5B0A" />
+          </div>
+          <div className="flex-1">
+            <p className="text-[13px]" style={{ color: C.ink, fontFamily: F, fontWeight: 700 }}>
+              No password set
+            </p>
+            <p className="text-[12px] mt-0.5" style={{ color: "#8A6A3D", fontFamily: F }}>
+              You signed up with Google, so this account can't sign in on a device where you're not signed into Google. Add a password as a backup.
+            </p>
+          </div>
+        </div>
+        <GhostAdd label="Set a password" onClick={() => setSettingUp(true)} />
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-3 max-w-xs">
+      {changing && (
+        <div>
+          <label className="block text-[11.5px] mb-1" style={{ color: C.sub, fontFamily: F, fontWeight: 600 }}>
+            Current password
+          </label>
+          <div className="flex items-center gap-2">
+            <input
+              autoFocus
+              type={showCurrentPw ? "text" : "password"}
+              value={currentPassword}
+              onChange={(e) => setCurrentPassword(e.target.value)}
+              placeholder="Current password"
+              className="w-full text-sm bg-transparent outline-none border-b pb-1"
+              style={{ color: C.ink, fontFamily: F, fontWeight: 500, borderColor: C.ink }}
+            />
+            <button type="button" onClick={() => setShowCurrentPw((s) => !s)} aria-label={showCurrentPw ? "Hide password" : "Show password"} className="shrink-0">
+              {showCurrentPw ? <EyeOff size={14} color={C.sub} /> : <Eye size={14} color={C.sub} />}
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div>
+        <label className="block text-[11.5px] mb-1" style={{ color: C.sub, fontFamily: F, fontWeight: 600 }}>
+          New password
+        </label>
+        <div className="flex items-center gap-2">
+          <input
+            autoFocus={!changing}
+            type={showPw ? "text" : "password"}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="New password"
+            className="w-full text-sm bg-transparent outline-none border-b pb-1"
+            style={{ color: C.ink, fontFamily: F, fontWeight: 500, borderColor: C.ink }}
+          />
+          <button type="button" onClick={() => setShowPw((s) => !s)} aria-label={showPw ? "Hide password" : "Show password"} className="shrink-0">
+            {showPw ? <EyeOff size={14} color={C.sub} /> : <Eye size={14} color={C.sub} />}
+          </button>
+        </div>
+        {(password.length > 0) && (
+          <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1">
+            {[
+              [checks.length, "8+ characters"],
+              [checks.upper, "One capital letter"],
+              [checks.number, "One number"],
+              [checks.symbol, "One symbol"],
+            ].map(([ok, label]) => (
+              <div key={label} className="flex items-center gap-1.5">
+                {ok ? <Check size={11} color="#1F6B3A" /> : <X size={11} color={C.faint} />}
+                <span className="text-[10.5px]" style={{ color: ok ? "#1F6B3A" : C.sub, fontFamily: F }}>{label}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div>
+        <label className="block text-[11.5px] mb-1" style={{ color: C.sub, fontFamily: F, fontWeight: 600 }}>
+          Confirm {changing ? "new " : ""}password
+        </label>
+        <input
+          type={showPw ? "text" : "password"}
+          value={confirm}
+          onChange={(e) => setConfirm(e.target.value)}
+          placeholder="Confirm password"
+          className="w-full text-sm bg-transparent outline-none border-b pb-1"
+          style={{ color: C.ink, fontFamily: F, fontWeight: 500, borderColor: confirm.length > 0 && !matches ? C.brick : C.ink }}
+        />
+        {confirm.length > 0 && !matches && (
+          <p className="text-[11px] mt-1" style={{ color: C.brickDark, fontFamily: F }}>Passwords don't match.</p>
+        )}
+      </div>
+
+      {error && (
+        <p className="text-[11.5px]" style={{ color: C.brickDark, fontFamily: F }}>{error}</p>
+      )}
+
+      <div className="flex items-center gap-2">
+        <button
+          onClick={reset}
+          disabled={submitting}
+          className="text-xs px-3.5 py-2 rounded-full transition-colors hover:bg-[#F4F4F5]"
+          style={{ border: `1px solid ${C.border}`, color: C.ink, fontFamily: F, fontWeight: 600 }}
+        >
+          Cancel
+        </button>
+        <button
+          onClick={submit}
+          disabled={!canSubmit || submitting}
+          className="text-xs px-3.5 py-2 rounded-full text-white transition-opacity"
+          style={{ background: C.ink, fontFamily: F, fontWeight: 600, opacity: canSubmit && !submitting ? 1 : 0.4 }}
+        >
+          {submitting ? (changing ? "Changing…" : "Setting…") : changing ? "Change password" : "Set password"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Two-step verification setup. Previously "Add two-step verification"
+ * flipped the flag straight to true with no verification step at all, and
+ * before that a locally-generated code stood in for a real emailed one.
+ * Now this sends an actual OTP to the account's email via the same
+ * /api/email-otp/send + /api/email-otp/verify backend used for account
+ * deletion (purpose "twofactor"), and only flips the flag on once that
+ * code is confirmed server-side.
  */
 function TwoFactorSetup({ onVerified, onCancel }) {
   const [code, setCode] = useState("");
@@ -1753,14 +1960,17 @@ function SignedOut() {
 ------------------------------------------------------------------ */
 export default function ProfilePage() {
   const router = useRouter();
-  const { user: authUser, loading: authLoading } = useAuth();
-  const [user, setUser] = useState(null);
+  const { user: authUser, loading: authLoading, refreshUser } = useAuth();  const [user, setUser] = useState(null);
   const [profileLoading, setProfileLoading] = useState(true);
   const [tab, setTab] = useState("profile"); // "profile" | "security"
   const [savedFlash, setSavedFlash] = useState(false);
   const [editingKey, setEditingKey] = useState(null); // "name" | "email" | "phone" | "address" | "addEmail"
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [settingUpTwoFactor, setSettingUpTwoFactor] = useState(false);
+  // hasPasswordProvider(authUser) only reflects reality once Firebase's
+  // onAuthStateChanged fires again, which linkWithCredential does NOT
+  // trigger — so this local flag covers the gap right after setting one.
+  const [passwordJustSet, setPasswordJustSet] = useState(false);
   const device = useMemo(() => readDeviceInfo(), []);
   const [sessionStart] = useState(() => new Date());
 
@@ -2256,6 +2466,18 @@ export default function ProfilePage() {
             </p>
 
             <div className="mt-2">
+              {/* Password (only relevant to show for Google-signed-up accounts without one yet) */}
+              <Row label="Password">
+                <PasswordSetupRow
+                  hasPassword={passwordJustSet || hasPasswordProvider(authUser)}
+                  refreshUser={refreshUser}
+                  onPasswordSet={() => {
+                    setPasswordJustSet(true);
+                    flashSaved();
+                  }}
+                />
+              </Row>
+
               {/* Two-step verification */}
               <Row label="Two-step verification">
                 {user.twoFactorEnabled ? (

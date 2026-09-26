@@ -2,6 +2,7 @@
 
 import { useState, useMemo, useEffect, useRef } from "react";
 import Link from "next/link";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import {
   Mail,
@@ -18,8 +19,8 @@ import {
   CalendarDays,
   Loader2
 } from "lucide-react";
-import { signInWithEmail, signInWithGoogle, signUpWithEmail, resetPassword, sendEmailOtp, verifyEmailOtpCode, signOutUser } from "@/backend/lib/auth";
-import { reload } from "firebase/auth";
+import { signInWithEmail, signInWithGoogle, signUpWithEmail, resetPassword, sendEmailOtp, verifyEmailOtpCode, signOutUser, setPasswordForGoogleAccount } from "@/backend/lib/auth";
+import { reload, getAdditionalUserInfo } from "firebase/auth";
 import { auth } from "@/backend/lib/firebase";
 import { createUserProfile, ensureUserProfile } from "@/backend/lib/userProfile";
 import { useAuth } from "@/frontend/hooks/useAuth";
@@ -199,6 +200,141 @@ function PasswordField({ value, onChange, placeholder = "Password", showRules = 
 
 /* ---------------- Google sign-in ---------------- */
 
+/**
+ * Shown right after a Google sign-up, and reusable from the profile
+ * Security page for anyone who skipped it. A Google-only account has no
+ * password credential on it, so signing in from a device/browser without
+ * an active Google session is a dead end — this links a real password
+ * credential (via linkWithCredential) without touching the Google sign-in.
+ */
+function SetPasswordModal({ email, onDone, onSkip }) {
+  const { refreshUser } = useAuth();
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
+
+  const checks = passwordChecks(password);
+  const strong = checks.length && checks.upper && checks.number && checks.symbol;
+  const matches = confirm.length > 0 && confirm === password;
+  const canSubmit = strong && matches && !submitting;
+
+  const handleSubmit = async (e) => {
+    if (e) e.preventDefault();
+    if (!canSubmit) return;
+    setSubmitting(true);
+    setError("");
+    try {
+      await setPasswordForGoogleAccount(password);
+      await refreshUser();
+      onDone();
+    } catch (err) {
+      setError(err?.message || "Could not set password. Please try again.");
+      setSubmitting(false);
+    }
+  };
+
+  const handleSkip = () => {
+    onSkip();
+  };
+
+  useEffect(() => {
+    if (!onSkip) return;
+    const handleKeyDown = (e) => {
+      if (e.key === "Escape") handleSkip();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [handleSkip, onSkip]);
+
+  const content = (
+    <div
+      className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
+      style={{
+        background: "rgba(20,17,15,0.55)",
+        backdropFilter: "blur(3px)"
+      }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget && onSkip) handleSkip();
+      }}
+    >
+      <div
+        className="relative w-full max-w-sm rounded-3xl p-7"
+        style={{
+          background: C.paper,
+          boxShadow: "0 30px 70px -20px rgba(0,0,0,0.45)",
+          animation: "fadeUp 0.25s ease"
+        }}
+      >
+        {onSkip && (
+          <button
+            type="button"
+            onClick={handleSkip}
+            disabled={submitting}
+            className="absolute top-5 right-5 w-8 h-8 rounded-full flex items-center justify-center transition-colors hover:bg-[#F4F4F5] disabled:opacity-50"
+          >
+            <X size={16} color={C.sub} />
+          </button>
+        )}
+
+        <div className="mb-5">
+          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full" style={{ background: C.blush }}>
+            <Lock size={20} color={C.brick} />
+          </div>
+          <h2 className="text-xl font-bold tracking-tight text-center" style={{ color: C.ink, fontFamily: FD }}>
+            Add a password to your account
+          </h2>
+          <p className="text-sm text-center mt-2 leading-6" style={{ color: C.sub, fontFamily: FB }}>
+            You signed up with Google, so <strong>{email}</strong> has no password yet. Set one so you can still log in on a device or browser where you're not signed into Google.
+          </p>
+        </div>
+
+        <div className="flex flex-col gap-3">
+          <PasswordField value={password} onChange={(e) => setPassword(e.target.value)} placeholder="New password" showRules disabled={submitting} />
+          <PasswordField value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder="Confirm password" disabled={submitting} />
+          {confirm.length > 0 && !matches && (
+            <p className="text-xs -mt-1.5 ml-1" style={{ color: C.brick, fontFamily: FB }}>Passwords don't match.</p>
+          )}
+        </div>
+
+        {error && (
+          <p className="text-xs mt-3 text-center px-2 py-2 rounded-md" style={{ color: C.brick, background: C.blush, fontFamily: FB }}>
+            {error}
+          </p>
+        )}
+
+        <div className="flex gap-3 mt-6">
+          {onSkip && (
+            <button
+              type="button"
+              onClick={handleSkip}
+              disabled={submitting}
+              className="flex-1 py-3 rounded-full text-sm font-semibold transition-all disabled:opacity-50"
+              style={{ background: C.stage, color: C.ink, fontFamily: FB }}
+            >
+              Skip for now
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={handleSubmit}
+            disabled={!canSubmit || submitting}
+            className="flex-1 py-3 rounded-full text-white text-sm font-semibold flex items-center justify-center gap-2 transition-all disabled:opacity-60"
+            style={{ background: C.brick, fontFamily: FB }}
+          >
+            {submitting ? <>
+              <Loader2 size={14} className="animate-spin" />
+              Setting...
+            </> : "Set Password"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
+  return createPortal(content, document.body);
+}
+
 function GoogleGlyph({ size = 18 }) {
   return (
     <svg width={size} height={size} viewBox="0 0 18 18" style={{ overflow: "visible" }}>
@@ -212,8 +348,27 @@ function GoogleGlyph({ size = 18 }) {
 
 function GoogleButton({ label = "Sign in with Google" }) {
   const router = useRouter();
+  const { pendingTwoFactorUser, user: authedUser } = useAuth();
   const [pending, setPending] = useState(false);
   const [notice, setNotice] = useState("");
+  // Shown once, right after a fresh Google sign-up, so the account isn't
+  // left password-less. Navigation to /action is held until this resolves
+  // (set or skipped) so it can't be missed mid-redirect.
+  const [showSetPassword, setShowSetPassword] = useState(false);
+  const [newUserEmail, setNewUserEmail] = useState("");
+  // True once this button's own sign-in call has succeeded, so the effect
+  // below only routes for a sign-in *this button* just did.
+  const [awaitingSession, setAwaitingSession] = useState(false);
+
+  // AuthPage's TwoFactorGate (mounted above both LoginForm and
+  // RegisterForm) takes over rendering the moment pendingTwoFactorUser is
+  // set, so this only needs to route once a real, non-2FA-pending session
+  // exists — matching how LoginForm's own submit already behaves.
+  useEffect(() => {
+    if (awaitingSession && authedUser && !pendingTwoFactorUser) {
+      router.push("/action");
+    }
+  }, [awaitingSession, authedUser, pendingTwoFactorUser, router]);
 
   const handleGoogleAuth = async () => {
     setPending(true);
@@ -223,7 +378,19 @@ function GoogleButton({ label = "Sign in with Google" }) {
         name: cred.user.displayName || "",
         email: cred.user.email || "",
       });
-      router.push("/action");
+      const isNewUser = Boolean(getAdditionalUserInfo(cred)?.isNewUser);
+      if (isNewUser) {
+        // A brand-new account can't have 2FA on yet — go straight to the
+        // set-password prompt instead of waiting on useAuth.
+        setNewUserEmail(cred.user.email || "");
+        setShowSetPassword(true);
+        setPending(false);
+        return; // routing to /action happens once the modal resolves
+      }
+      // Don't navigate here — useAuth needs a moment to check whether this
+      // account has 2FA on. The effect above routes once it resolves to a
+      // real session; if 2FA is on, TwoFactorGate takes over instead.
+      setAwaitingSession(true);
     } catch (err) {
       setPending(false);
       setNotice(err?.message || "Google sign-in failed. Please try again.");
@@ -232,6 +399,16 @@ function GoogleButton({ label = "Sign in with Google" }) {
     }
     setPending(false);
   };
+
+  if (showSetPassword) {
+  return (
+    <SetPasswordModal
+      email={newUserEmail}
+      onDone={() => { setShowSetPassword(false); router.push("/action"); }}
+      onSkip={() => { setShowSetPassword(false); router.push("/action"); }}
+    />
+  );
+}
 
   return (
     <div>
@@ -443,7 +620,7 @@ function RightTagline() {
 
 function LoginForm({ onSwitch }) {
   const router = useRouter();
-  const { user: authedUser, pendingTwoFactorUser, completeTwoFactor } = useAuth();
+  const { user: authedUser, pendingTwoFactorUser } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [touched, setTouched] = useState(false);
@@ -456,21 +633,15 @@ function LoginForm({ onSwitch }) {
   const [awaitingSession, setAwaitingSession] = useState(false);
 
   // Once useAuth confirms a real (non-2FA-pending) session after this
-  // form's own submit, move on. This is what actually handles routing —
-  // handleSubmit itself no longer guesses whether 2FA is required.
+  // form's own submit, move on. If 2FA is required instead, AuthPage's
+  // TwoFactorGate takes over rendering entirely (it sits above both
+  // LoginForm and RegisterForm), so this effect only ever needs to
+  // handle the plain, no-2FA success path.
   useEffect(() => {
     if (awaitingSession && authedUser && !pendingTwoFactorUser) {
       router.push("/action");
     }
   }, [awaitingSession, authedUser, pendingTwoFactorUser, router]);
-
-  // Two-step verification: once signInWithEmail succeeds for an account
-  // with 2FA on, useAuth holds the session as pendingTwoFactorUser (and
-  // has already sent the OTP) instead of exposing it as a real session.
-  const [otp, setOtp] = useState("");
-  const [otpStatus, setOtpStatus] = useState("");
-  const [verifyingOtp, setVerifyingOtp] = useState(false);
-  const [resendingOtp, setResendingOtp] = useState(false);
 
   const emailCheck = useMemo(() => validateEmail(email), [email]);
   const canSubmit = emailCheck.valid && password.length > 0;
@@ -490,94 +661,13 @@ function LoginForm({ onSwitch }) {
       // Don't navigate here — useAuth needs a moment to check whether this
       // account has 2FA on. The effect above routes once it resolves to a
       // real session; if 2FA is on, pendingTwoFactorUser flips instead and
-      // this component renders the OTP screen below.
+      // AuthPage swaps in TwoFactorGate above this component entirely.
       setAwaitingSession(true);
     } catch (err) {
       setAuthError(err?.message || "Couldn't sign in. Please try again.");
       setSubmitting(false);
     }
   };
-
-  const verifyTwoFactor = async () => {
-    if (!/^\d{6}$/.test(otp)) {
-      setOtpStatus("Enter the 6-digit OTP from your email.");
-      return;
-    }
-    setVerifyingOtp(true);
-    setOtpStatus("");
-    try {
-      await verifyEmailOtpCode(otp, "twofactor");
-      completeTwoFactor();
-      setAwaitingSession(true); // let the effect above route once `user` flips
-    } catch (err) {
-      setOtpStatus(err?.message || "Could not verify the OTP.");
-    } finally {
-      setVerifyingOtp(false);
-    }
-  };
-
-  const resendTwoFactor = async () => {
-    setResendingOtp(true);
-    try {
-      await sendEmailOtp("twofactor");
-      setOtpStatus("A new OTP was sent to your email.");
-    } catch (err) {
-      setOtpStatus(err?.message || "Could not resend the OTP.");
-    } finally {
-      setResendingOtp(false);
-    }
-  };
-
-  const cancelTwoFactor = async () => {
-    await signOutUser();
-    setOtp("");
-    setOtpStatus("");
-    setSubmitting(false);
-    setAwaitingSession(false);
-  };
-
-  if (pendingTwoFactorUser) {
-    return (
-      <div className="w-full max-w-sm mx-auto" style={{ animation: "fadeUp 0.3s ease" }}>
-        <div className="text-center">
-          <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-full bg-red-50 text-2xl">🔐</div>
-          <h1 className="text-3xl font-bold tracking-tight mb-2" style={{ color: C.ink, fontFamily: FD }}>Two-step verification</h1>
-          <p className="text-sm leading-6" style={{ color: C.sub, fontFamily: FB }}>
-            Enter the 6-digit OTP we sent to <strong>{pendingTwoFactorUser.email}</strong> to finish signing in.
-          </p>
-        </div>
-
-        {otpStatus && (
-          <p className="mt-4 rounded-2xl p-3 text-xs text-center" style={{ background: C.field, color: C.ink, fontFamily: FB }}>
-            {otpStatus}
-          </p>
-        )}
-
-        <div className="mt-6 flex flex-col gap-3">
-          <input
-            value={otp}
-            onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
-            onKeyDown={(e) => e.key === "Enter" && verifyTwoFactor()}
-            inputMode="numeric"
-            autoComplete="one-time-code"
-            maxLength={6}
-            placeholder="Enter 6-digit OTP"
-            className="w-full py-3.5 px-5 rounded-full text-center text-lg tracking-[0.35em] outline-none"
-            style={{ background: C.field, color: C.ink, fontFamily: "monospace", border: `1.5px solid ${C.ink}12` }}
-          />
-          <button type="button" onClick={verifyTwoFactor} disabled={verifyingOtp || otp.length !== 6} className="w-full py-3.5 rounded-full text-white text-sm font-semibold disabled:opacity-60" style={{ background: C.brick, fontFamily: FB }}>
-            {verifyingOtp ? "Verifying..." : "Verify & continue"}
-          </button>
-          <button type="button" onClick={resendTwoFactor} disabled={resendingOtp} className="w-full py-3.5 rounded-full text-sm font-semibold disabled:opacity-60" style={{ border: `1.5px solid ${C.ink}1A`, color: C.ink, fontFamily: FB }}>
-            {resendingOtp ? "Sending..." : "Resend OTP"}
-          </button>
-          <button type="button" onClick={cancelTwoFactor} className="py-2 text-sm" style={{ color: C.sub, fontFamily: FB }}>
-            Cancel and use a different account
-          </button>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <form
@@ -1195,8 +1285,104 @@ function RegisterForm({ onSwitch }) {
 
 /* ---------------- Root ---------------- */
 
+/**
+ * Intercepts ANY signed-in-but-2FA-pending session, regardless of how it
+ * got here — email/password login (LoginForm's own submit) or Google
+ * sign-in (GoogleButton, used inside both LoginForm and RegisterForm).
+ * Mounted once at the AuthPage level so it can't be bypassed by whichever
+ * button the person happened to click.
+ */
+function TwoFactorGate({ onVerified }) {
+  const { pendingTwoFactorUser, completeTwoFactor } = useAuth();
+  const [otp, setOtp] = useState("");
+  const [otpStatus, setOtpStatus] = useState("");
+  const [verifyingOtp, setVerifyingOtp] = useState(false);
+  const [resendingOtp, setResendingOtp] = useState(false);
+
+  if (!pendingTwoFactorUser) return null;
+
+  const verifyTwoFactor = async () => {
+    if (!/^\d{6}$/.test(otp)) {
+      setOtpStatus("Enter the 6-digit OTP from your email.");
+      return;
+    }
+    setVerifyingOtp(true);
+    setOtpStatus("");
+    try {
+      await verifyEmailOtpCode(otp, "twofactor");
+      completeTwoFactor();
+      onVerified();
+    } catch (err) {
+      setOtpStatus(err?.message || "Could not verify the OTP.");
+    } finally {
+      setVerifyingOtp(false);
+    }
+  };
+
+  const resendTwoFactor = async () => {
+    setResendingOtp(true);
+    try {
+      await sendEmailOtp("twofactor");
+      setOtpStatus("A new OTP was sent to your email.");
+    } catch (err) {
+      setOtpStatus(err?.message || "Could not resend the OTP.");
+    } finally {
+      setResendingOtp(false);
+    }
+  };
+
+  const cancelTwoFactor = async () => {
+    await signOutUser();
+    setOtp("");
+    setOtpStatus("");
+  };
+
+  return (
+    <div className="w-full max-w-sm mx-auto" style={{ animation: "fadeUp 0.3s ease" }}>
+      <div className="text-center">
+        <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-full bg-red-50 text-2xl">🔐</div>
+        <h1 className="text-3xl font-bold tracking-tight mb-2" style={{ color: C.ink, fontFamily: FD }}>Two-step verification</h1>
+        <p className="text-sm leading-6" style={{ color: C.sub, fontFamily: FB }}>
+          Enter the 6-digit OTP we sent to <strong>{pendingTwoFactorUser.email}</strong> to finish signing in.
+        </p>
+      </div>
+
+      {otpStatus && (
+        <p className="mt-4 rounded-2xl p-3 text-xs text-center" style={{ background: C.field, color: C.ink, fontFamily: FB }}>
+          {otpStatus}
+        </p>
+      )}
+
+      <div className="mt-6 flex flex-col gap-3">
+        <input
+          value={otp}
+          onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
+          onKeyDown={(e) => e.key === "Enter" && verifyTwoFactor()}
+          inputMode="numeric"
+          autoComplete="one-time-code"
+          maxLength={6}
+          placeholder="Enter 6-digit OTP"
+          className="w-full py-3.5 px-5 rounded-full text-center text-lg tracking-[0.35em] outline-none"
+          style={{ background: C.field, color: C.ink, fontFamily: "monospace", border: `1.5px solid ${C.ink}12` }}
+        />
+        <button type="button" onClick={verifyTwoFactor} disabled={verifyingOtp || otp.length !== 6} className="w-full py-3.5 rounded-full text-white text-sm font-semibold disabled:opacity-60" style={{ background: C.brick, fontFamily: FB }}>
+          {verifyingOtp ? "Verifying..." : "Verify & continue"}
+        </button>
+        <button type="button" onClick={resendTwoFactor} disabled={resendingOtp} className="w-full py-3.5 rounded-full text-sm font-semibold disabled:opacity-60" style={{ border: `1.5px solid ${C.ink}1A`, color: C.ink, fontFamily: FB }}>
+          {resendingOtp ? "Sending..." : "Resend OTP"}
+        </button>
+        <button type="button" onClick={cancelTwoFactor} className="py-2 text-sm" style={{ color: C.sub, fontFamily: FB }}>
+          Cancel and use a different account
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function AuthPage({ initialMode = "login" }) {
   const [mode, setMode] = useState(initialMode);
+  const router = useRouter();
+  const { pendingTwoFactorUser } = useAuth();
 
   return (
         <div className="min-h-dvh w-full lg:flex lg:items-center lg:justify-center lg:p-8" style={{ background: C.cream }}>
@@ -1282,7 +1468,9 @@ style={{
           </div>
 
           <div className="px-8 md:px-9 pb-8 md:pb-9 pt-0 flex-1 overflow-y-auto hide-scroll">
-            {mode === "login" ? (
+            {pendingTwoFactorUser ? (
+              <TwoFactorGate onVerified={() => router.push("/action")} />
+            ) : mode === "login" ? (
               <LoginForm onSwitch={() => setMode("register")} />
             ) : (
               <RegisterForm onSwitch={() => setMode("login")} />
