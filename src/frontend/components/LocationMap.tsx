@@ -6,9 +6,10 @@ type Coordinates = { lat: number; lng: number };
 
 type LocationMapProps = {
   value?: Coordinates | null;
-  onChange: (location: Coordinates, label?: string) => void;
+  onChange?: (location: Coordinates, label?: string) => void;
   height?: number;
   className?: string;
+  readOnly?: boolean;
 };
 
 type LeafletMap = {
@@ -68,7 +69,7 @@ function loadLeaflet(): Promise<Leaflet> {
   });
 }
 
-export default function LocationMap({ value, onChange, height = 320, className = "" }: LocationMapProps) {
+export default function LocationMap({ value, onChange, height = 320, className = "", readOnly = false }: LocationMapProps) {
   const mapRef = useRef<HTMLDivElement | null>(null);
   const mapInstance = useRef<LeafletMap | null>(null);
   const markerRef = useRef<LeafletMarker | null>(null);
@@ -90,10 +91,27 @@ export default function LocationMap({ value, onChange, height = 320, className =
           attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a> contributors',
         }).addTo(map);
 
-        map.on("click", (event) => {
-          const coords = { lat: event.latlng.lat, lng: event.latlng.lng };
-          onChange(coords);
+        // Display marker if we have coordinates (for readOnly mode or initial display)
+        if (value && L) {
+          if (markerRef.current) {
+            markerRef.current.remove?.();
+          }
+          markerRef.current = L.marker([value.lat, value.lng], {
+            title: readOnly ? "Request Location" : "Selected Location"
+          }).addTo(map);
+          
+          if (readOnly) {
+            markerRef.current.bindPopup(`Location: ${value.lat.toFixed(4)}, ${value.lng.toFixed(4)}`);
+            markerRef.current.openPopup();
+          }
+        }
+
+        if (!readOnly && onChange) {
+         map.on("click", (event) => {
+         const coords = { lat: event.latlng.lat, lng: event.latlng.lng };
+         onChange(coords);
         });
+      }
 
         mapInstance.current = map;
       })
@@ -217,8 +235,10 @@ export default function LocationMap({ value, onChange, height = 320, className =
       </div>
 
       <p className="mt-2 text-xs text-gray-500">
-        Click anywhere on the map to choose the donation/request location.
-        {value ? ` Selected: ${value.lat.toFixed(5)}, ${value.lng.toFixed(5)}` : ""}
+        {readOnly 
+          ? `Request location: ${value?.lat.toFixed(5)}, ${value?.lng.toFixed(5)}`
+          : `Click anywhere on the map to choose the donation/request location.${value ? ` Selected: ${value.lat.toFixed(5)}, ${value.lng.toFixed(5)}` : ""}`
+        }
       </p>
     </div>
   );

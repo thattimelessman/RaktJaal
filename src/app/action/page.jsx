@@ -469,7 +469,7 @@ function MapPicker({ value, onPick, initialCoords = null }) {
    the bottom of the screen). Same overlay pattern as Avatar's
    tap-to-expand photo view.
 ------------------------------------------------------------------ */
-function MapModal({ label, value, onPick, onClose, initialCoords = null }) {
+function MapModal({ label, value, onPick, onClose, initialCoords = null, readOnly = false }) {
   return (
     <div
       className="fixed inset-0 z-[9999] flex items-center justify-center p-4 sm:p-8"
@@ -491,7 +491,16 @@ function MapModal({ label, value, onPick, onClose, initialCoords = null }) {
             <X size={15} color={C.sub} />
           </button>
         </div>
-        <MapPicker value={value} onPick={onPick} initialCoords={initialCoords} />
+        {readOnly ? (
+  <LocationMap
+    value={initialCoords}
+    onChange={undefined}
+    readOnly={true}
+    height={300}
+  />
+) : (
+  <MapPicker value={value} onPick={onPick} initialCoords={initialCoords} />
+)}
       </div>
     </div>
   );
@@ -1644,6 +1653,7 @@ function DonateBloodFlow({ me, incoming, donorSync, onApprove, onDecline, onOpen
             initialCoords={{ lat: activeRequest.lat, lng: activeRequest.lng }}
             onPick={() => {}}
             onClose={() => setShowMapFor(null)}
+            readOnly={true}
           />
         );
       })()}
