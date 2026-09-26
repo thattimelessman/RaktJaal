@@ -177,7 +177,7 @@ export default function LocationMap({ value, onChange, height = 320, className =
         return;
       }
       const result = results[0];
-      onChange({ lat: Number(result.lat), lng: Number(result.lon) }, result.display_name);
+      onChange?.({ lat: Number(result.lat), lng: Number(result.lon) }, result.display_name);
     } catch (error) {
       setMapError(error instanceof Error ? error.message : "Location search failed.");
     } finally {
