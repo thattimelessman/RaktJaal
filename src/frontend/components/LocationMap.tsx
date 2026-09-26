@@ -28,6 +28,7 @@ type LeafletMarker = {
   setLatLng: (coords: [number, number]) => LeafletMarker;
   bindPopup: (text: string) => LeafletMarker;
   openPopup: () => LeafletMarker;
+  remove: () => void;
 };
 
 declare global {
