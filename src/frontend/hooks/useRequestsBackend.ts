@@ -33,6 +33,7 @@ interface ProfileLike {
   uid: string;
   email?: string;
   name?: string;
+  profilePhoto?: string | null;
   bloodType?: string;
   phone?: string;
   address?: {
@@ -72,6 +73,7 @@ export function useRequestsBackend(profile: ProfileLike | null, profileComplete:
     ? [
         profile.uid,
         profile.name,
+        profile.profilePhoto,
         profile.bloodType,
         profile.phone,
         profile.address?.street,

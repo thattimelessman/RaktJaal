@@ -22,6 +22,7 @@ import {
   updateDoc,
 } from "firebase/firestore";
 import { db } from "@/backend/lib/firebase";
+import type { DonationLogEntry } from "@/backend/types";
 
 export interface UserProfile {
   uid: string;
@@ -40,6 +41,13 @@ export interface UserProfile {
   secondaryEmails?: string[];
   profilePhoto?: string | null;
   createdAt?: number;
+  /**
+   * Verified donation history, both directions: entries where this person
+   * was the donor AND entries where they were the requester (receiver),
+   * distinguished by `role`. Written automatically once both sides confirm
+   * a donation (see confirmDonation in requests.ts) — never edited by hand.
+   */
+  donations?: DonationLogEntry[];
   [key: string]: unknown;
 }
 

@@ -51,66 +51,87 @@ service cloud.firestore {
        - identity/blood/location fields can never change after create
     ---------------------------------------------------------------- */
     match /requests/{requestId} {
-      allow read: if signedIn()
-        && (resource.data.requesterUid == request.auth.uid
-            || resource.data.donorUid == request.auth.uid);
 
-      allow create: if signedIn()
-        && request.resource.data.requesterUid == request.auth.uid
-        && request.resource.data.donorUid != request.auth.uid
-        && requestId == request.auth.uid + '_' + request.resource.data.donorUid
+  // Participants can always read their own requests.
+  // Any signed-in user can read PENDING requests so the
+  // Donate Blood city feed can work.
+  allow read: if signedIn()
+    && (
+      resource.data.requesterUid == request.auth.uid
+      || resource.data.donorUid == request.auth.uid
+      || resource.data.status == 'pending'
+    );
+
+  // Requester creates their own pending request.
+  allow create: if signedIn()
+    && request.resource.data.requesterUid == request.auth.uid
+    && request.resource.data.donorUid != request.auth.uid
+    && requestId == request.auth.uid + '_' + request.resource.data.donorUid
+    && request.resource.data.status == 'pending'
+    && request.resource.data.units is int
+    && request.resource.data.units >= 1
+    && request.resource.data.units <= 20;
+
+  // Status transitions.
+  allow update: if signedIn()
+    && request.resource.data.diff(resource.data).affectedKeys()
+         .hasOnly(['status', 'threadId', 'approvedAt', 'updatedAt'])
+    && (
+      // Donor: pending -> approved/declined
+      (
+        resource.data.status == 'pending'
+        && resource.data.donorUid == request.auth.uid
+        && request.resource.data.status in ['approved', 'declined']
+      )
+
+      ||
+
+      // Requester: pending -> cancelled
+      (
+        resource.data.status == 'pending'
+        && resource.data.requesterUid == request.auth.uid
+        && request.resource.data.status == 'cancelled'
+      )
+
+      ||
+
+      // Requester: cancelled -> pending
+      (
+        resource.data.status == 'cancelled'
+        && resource.data.requesterUid == request.auth.uid
         && request.resource.data.status == 'pending'
-        && request.resource.data.units is int
-        && request.resource.data.units >= 1
-        && request.resource.data.units <= 20;
+      )
+    );
 
-      allow update: if signedIn()
-        && request.resource.data.diff(resource.data).affectedKeys()
-             .hasOnly(['status', 'threadId', 'updatedAt'])
-        && (
-          // donor decides on a pending request
-          (resource.data.status == 'pending'
-            && resource.data.donorUid == request.auth.uid
-            && request.resource.data.status in ['approved', 'declined'])
-          ||
-          // requester withdraws a pending request
-          (resource.data.status == 'pending'
-            && resource.data.requesterUid == request.auth.uid
-            && request.resource.data.status == 'cancelled')
-          ||
-          // requester re-opens their own cancelled request
-          (resource.data.status == 'cancelled'
-            && resource.data.requesterUid == request.auth.uid
-            && request.resource.data.status == 'pending')
-        );
+  allow delete: if false;
 
-      allow delete: if false;
+  /* ---------------- contacts ---------------- */
 
-      /* contacts/{uid}: that person's phone number, shared with the other
-         participant of this request. Symmetric by design (a donor must be able
-         to call the requester just as the requester can call the donor).
-         - each person may write ONLY their own contact doc
-         - either participant may read them, but ONLY once approved,
-           so a pending request never exposes a number */
-      match /contacts/{contactUid} {
-        allow create, update: if isSelf(contactUid)
-          && request.auth.uid in [
-               get(/databases/$(database)/documents/requests/$(requestId)).data.requesterUid,
-               get(/databases/$(database)/documents/requests/$(requestId)).data.donorUid
-             ]
-          && request.resource.data.keys().hasOnly(['uid', 'phone', 'updatedAt'])
-          && request.resource.data.uid == request.auth.uid;
+  match /contacts/{contactUid} {
 
-        allow read: if signedIn()
-          && get(/databases/$(database)/documents/requests/$(requestId)).data.status == 'approved'
-          && request.auth.uid in [
-               get(/databases/$(database)/documents/requests/$(requestId)).data.requesterUid,
-               get(/databases/$(database)/documents/requests/$(requestId)).data.donorUid
-             ];
+    // Each person may publish only their own contact information,
+    // and only if they are a participant in this request.
+    allow create, update: if isSelf(contactUid)
+      && request.auth.uid in [
+        get(/databases/$(database)/documents/requests/$(requestId)).data.requesterUid,
+        get(/databases/$(database)/documents/requests/$(requestId)).data.donorUid
+      ]
+      && request.resource.data.keys().hasOnly([
+        'uid', 'phone', 'updatedAt'
+      ])
+      && request.resource.data.uid == request.auth.uid;
 
-        allow delete: if false;
-      }
-    }
+    // Contacts become readable only after approval.
+    allow read: if signedIn()
+      && get(/databases/$(database)/documents/requests/$(requestId)).data.status == 'approved'
+      && request.auth.uid in [
+        get(/databases/$(database)/documents/requests/$(requestId)).data.requesterUid,
+        get(/databases/$(database)/documents/requests/$(requestId)).data.donorUid
+      ];
+
+    allow delete: if false;
+  }
+}
 
     /* ---------------------------------------------------------------
        threads/{id}: chat between the two people on an approved request.
@@ -134,7 +155,7 @@ service cloud.firestore {
       allow update: if signedIn()
         && request.auth.uid in resource.data.participants
         && request.resource.data.diff(resource.data).affectedKeys()
-             .hasOnly(['lastMessage', 'lastMessageAt', 'unread']);
+             .hasOnly(['lastMessage', 'lastMessageAt', 'unread', 'photos']);
 
       allow delete: if false;
 

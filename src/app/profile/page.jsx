@@ -29,7 +29,12 @@ import {
   Loader2,
   CalendarDays,
   Eye,
-  EyeOff
+  EyeOff,
+  BadgeCheck,
+  ArrowUpRight,
+  ArrowDownLeft,
+  MapPin,
+  Clock,
 } from "lucide-react";
 
 /* ---------------------------------------------------------------
@@ -42,6 +47,7 @@ import {
 const FONT_IMPORT = `
 @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap');
 @keyframes tabFadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes modalIn { from { opacity: 0; transform: scale(0.96); } to { opacity: 1; transform: scale(1); } }
 .tab-fade { animation: tabFadeIn 0.25s ease-out; }
 .rk-scroll { scrollbar-width: thin; scrollbar-color: #D4D4D8 transparent; }
 .rk-scroll::-webkit-scrollbar { width: 7px; }
@@ -1530,42 +1536,264 @@ function BloodTypePicker({ value, onSave }) {
     </div>
   );
 }
-function DonationHistory({ donations }) {
-  if (!donations || donations.length === 0) {
-    return (
-      <div className="rounded-xl p-5 text-center" style={{ background: C.hover, border: `1px dashed ${C.border}` }}>
-        <p className="text-sm" style={{ color: C.sub, fontFamily: F }}>
-          No donations yet. Once you donate through RaktJaal, it'll show up here.
-        </p>
-      </div>
-    );
-  }
+/* Popup shown when a donation history row is clicked — same footprint as
+   the profile page's own white panel (max-w-lg), centered over a dim
+   backdrop, with the counterpart's photo, phone, blood type, location, and
+   every timestamp in the donation's lifecycle (requested -> accepted ->
+   verified). All of this comes straight off the DonationLogEntry written
+   server-side in /api/donation/verified — no extra fetch needed. */
+function DonationDetailModal({ entry, onClose }) {
+  const isDonor = entry.role === "donor";
+
+  const fmt = (ts) =>
+    ts
+      ? new Date(ts).toLocaleString(undefined, {
+          month: "long",
+          day: "numeric",
+          year: "numeric",
+          hour: "numeric",
+          minute: "2-digit",
+        })
+      : "Not recorded";
+
+  const initials = (entry.counterpartName || "?")
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((p) => p[0]?.toUpperCase())
+    .join("");
+
   return (
-    <div className="flex flex-col gap-2">
-      {donations.map((d, i) => (
-        <div key={i} className="flex items-center justify-between px-3.5 py-2.5 rounded-xl" style={{ background: C.hover }}>
-          <div>
-            <div className="text-sm" style={{ color: C.ink, fontFamily: F, fontWeight: 600 }}>
-              {d.location || "Location not recorded"}
+    <div
+      className="fixed inset-0 z-[9999] flex items-center justify-center p-4 sm:p-8"
+      style={{ background: "rgba(0,0,0,0.5)", backdropFilter: "blur(3px)" }}
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-lg max-h-[85vh] overflow-y-auto rk-scroll rounded-2xl shadow-2xl"
+        style={{ background: C.paper, animation: "modalIn 0.16s ease-out forwards" }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-start justify-between gap-3 px-5 pt-5 pb-4" style={{ borderBottom: `1px solid ${C.border}` }}>
+          <div className="flex items-center gap-3 min-w-0">
+            <div
+              className="rounded-full overflow-hidden flex items-center justify-center shrink-0"
+              style={{ width: 52, height: 52, background: C.chip }}
+            >
+              {entry.counterpartPhoto ? (
+                <img src={entry.counterpartPhoto} alt={entry.counterpartName || "Profile"} className="w-full h-full object-cover" />
+              ) : (
+                <span className="font-semibold" style={{ color: C.ink, fontFamily: F, fontSize: 18 }}>{initials}</span>
+              )}
             </div>
-            <div className="text-xs mt-0.5" style={{ color: C.sub, fontFamily: F }}>
-              {d.date}
+            <div className="min-w-0">
+              <p className="text-base font-bold truncate" style={{ color: C.ink, fontFamily: F }}>
+                {entry.counterpartName || "Someone"}
+              </p>
+              <p className="text-xs mt-0.5" style={{ color: C.sub, fontFamily: F }}>
+                {isDonor ? "You donated to them" : "They donated to you"}
+              </p>
             </div>
           </div>
-          <span className="px-2.5 py-1 rounded-full text-xs text-white" style={{ background: C.brick, fontFamily: F, fontWeight: 600 }}>
-            {d.units ? `${d.units} unit${d.units > 1 ? "s" : ""}` : "1 unit"}
-          </span>
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 hover:bg-[#F4F4F5]"
+          >
+            <X size={16} color={C.sub} />
+          </button>
         </div>
-      ))}
+
+        {/* Body */}
+        <div className="px-5 py-4 flex flex-col gap-4">
+          {/* Quick facts */}
+          <div className="flex flex-wrap gap-2">
+            <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold" style={{ background: C.blush, color: C.brickDark, fontFamily: F }}>
+              <Droplet size={12} /> {entry.bloodType || "—"}
+            </span>
+            <span className="px-3 py-1.5 rounded-full text-xs font-bold" style={{ background: C.chip, color: C.ink, fontFamily: F }}>
+              {entry.units ? `${entry.units} unit${entry.units > 1 ? "s" : ""}` : "1 unit"}
+            </span>
+          </div>
+
+          {/* Contact */}
+          <div className="flex flex-col gap-2.5">
+            <p className="text-[11px] uppercase tracking-wide font-bold" style={{ color: C.faint, fontFamily: F }}>Contact</p>
+            <div className="flex items-center gap-2.5">
+              <Phone size={14} color={C.sub} className="shrink-0" />
+              <span className="text-sm" style={{ color: entry.counterpartPhone ? C.ink : C.faint, fontFamily: F }}>
+                {entry.counterpartPhone || "Phone number not available"}
+              </span>
+            </div>
+            <div className="flex items-center gap-2.5">
+              <MapPin size={14} color={C.sub} className="shrink-0" />
+              <span className="text-sm" style={{ color: C.ink, fontFamily: F }}>
+                {entry.hospital || "Location not recorded"}{entry.city ? `, ${entry.city}` : ""}
+              </span>
+            </div>
+          </div>
+
+          {/* Timeline */}
+          <div className="flex flex-col gap-2.5">
+            <p className="text-[11px] uppercase tracking-wide font-bold" style={{ color: C.faint, fontFamily: F }}>Timeline</p>
+
+            <div className="flex gap-2.5">
+              <div className="flex flex-col items-center pt-0.5">
+                <div className="w-2 h-2 rounded-full shrink-0" style={{ background: C.faint }} />
+                <div className="w-px flex-1 mt-1" style={{ background: C.border }} />
+              </div>
+              <div className="pb-3 min-w-0">
+                <p className="text-xs font-semibold" style={{ color: C.ink, fontFamily: F }}>Request sent</p>
+                <p className="text-xs mt-0.5" style={{ color: C.sub, fontFamily: F }}>{fmt(entry.requestedAt)}</p>
+              </div>
+            </div>
+
+            <div className="flex gap-2.5 -mt-3">
+              <div className="flex flex-col items-center pt-0.5">
+                <div className="w-2 h-2 rounded-full shrink-0" style={{ background: C.faint }} />
+                <div className="w-px flex-1 mt-1" style={{ background: C.border }} />
+              </div>
+              <div className="pb-3 min-w-0">
+                <p className="text-xs font-semibold" style={{ color: C.ink, fontFamily: F }}>Request accepted</p>
+                <p className="text-xs mt-0.5" style={{ color: C.sub, fontFamily: F }}>{fmt(entry.acceptedAt)}</p>
+              </div>
+            </div>
+
+            <div className="flex gap-2.5 -mt-3">
+              <div className="flex flex-col items-center pt-0.5">
+                <div className="w-2 h-2 rounded-full shrink-0" style={{ background: "#1F6B3A" }} />
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs font-semibold" style={{ color: C.ink, fontFamily: F }}>Donation verified</p>
+                <p className="text-xs mt-0.5" style={{ color: C.sub, fontFamily: F }}>{fmt(entry.verifiedAt)}</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 px-3.5 py-2.5 rounded-xl" style={{ background: C.hover }}>
+            <BadgeCheck size={14} color="#1F6B3A" className="shrink-0" />
+            <span className="text-[11.5px]" style={{ color: C.sub, fontFamily: F }}>
+              Verified by both sides on {fmt(entry.verifiedAt)}.
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* One row in the donation history list. Clicking it opens
+   DonationDetailModal, a popup the size of the profile panel, with the
+   counterpart's photo, phone, blood type, location, and full timeline.
+   Real data comes from DonationLogEntry, written server-side once both
+   sides confirm a donation (see /api/donation/verified and confirmDonation
+   in requests.ts). */
+function DonationLogRow({ entry }) {
+  const [open, setOpen] = useState(false);
+  const isDonor = entry.role === "donor";
+  const verifiedDate = entry.verifiedAt
+    ? new Date(entry.verifiedAt).toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" })
+    : null;
+
+  return (
+    <>
+      <button
+        onClick={() => setOpen(true)}
+        className="w-full flex items-center justify-between px-3.5 py-2.5 text-left rounded-xl transition-colors hover:opacity-90"
+        style={{ background: C.hover }}
+      >
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div
+            className="w-7 h-7 rounded-full flex items-center justify-center shrink-0"
+            style={{ background: isDonor ? "#DEF5E4" : "#DCEEFF" }}
+          >
+            {isDonor ? (
+              <ArrowUpRight size={13} color="#1F6B3A" />
+            ) : (
+              <ArrowDownLeft size={13} color="#1D4ED8" />
+            )}
+          </div>
+          <div className="min-w-0">
+            <div className="text-sm truncate" style={{ color: C.ink, fontFamily: F, fontWeight: 600 }}>
+              {isDonor ? `Donated to ${entry.counterpartName || "someone"}` : `Received from ${entry.counterpartName || "someone"}`}
+            </div>
+            <div className="text-xs mt-0.5" style={{ color: C.sub, fontFamily: F }}>
+              {verifiedDate || "Date not recorded"}
+            </div>
+          </div>
+        </div>
+        <span className="px-2.5 py-1 rounded-full text-xs text-white shrink-0" style={{ background: C.brick, fontFamily: F, fontWeight: 600 }}>
+          {entry.units ? `${entry.units} unit${entry.units > 1 ? "s" : ""}` : "1 unit"}
+        </span>
+      </button>
+
+      {open && <DonationDetailModal entry={entry} onClose={() => setOpen(false)} />}
+    </>
+  );
+}
+
+function DonationHistory({ donations }) {
+  const [tab, setTab] = useState("donated"); // "donated" | "received"
+
+  const donated = (donations || []).filter((d) => d.role === "donor").sort((a, b) => (b.verifiedAt || 0) - (a.verifiedAt || 0));
+  const received = (donations || []).filter((d) => d.role === "requester").sort((a, b) => (b.verifiedAt || 0) - (a.verifiedAt || 0));
+  const rows = tab === "donated" ? donated : received;
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center gap-1.5">
+        <button
+          onClick={() => setTab("donated")}
+          className="text-xs px-3 py-1.5 rounded-full transition-colors"
+          style={{
+            background: tab === "donated" ? C.ink : C.chip,
+            color: tab === "donated" ? "#fff" : C.sub,
+            fontFamily: F,
+            fontWeight: 700,
+          }}
+        >
+          Donated ({donated.length})
+        </button>
+        <button
+          onClick={() => setTab("received")}
+          className="text-xs px-3 py-1.5 rounded-full transition-colors"
+          style={{
+            background: tab === "received" ? C.ink : C.chip,
+            color: tab === "received" ? "#fff" : C.sub,
+            fontFamily: F,
+            fontWeight: 700,
+          }}
+        >
+          Received ({received.length})
+        </button>
+      </div>
+
+      {rows.length === 0 ? (
+        <div className="rounded-xl p-5 text-center" style={{ background: C.hover, border: `1px dashed ${C.border}` }}>
+          <p className="text-sm" style={{ color: C.sub, fontFamily: F }}>
+            {tab === "donated"
+              ? "No donations yet. Once you donate and both sides confirm it, it'll show up here."
+              : "No received donations yet. Once someone donates to you and you both confirm it, it'll show up here."}
+          </p>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-2">
+          {rows.map((entry, i) => (
+            <DonationLogRow key={`${entry.requestId}-${i}`} entry={entry} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
 function nextEligibleText(donations) {
-  if (!donations || donations.length === 0) return "You're eligible to donate right now.";
-  const last = donations[donations.length - 1];
-  if (!last?.date) return "You're eligible to donate right now.";
-  const lastDate = new Date(last.date);
+  const donated = (donations || []).filter((d) => d.role === "donor");
+  if (donated.length === 0) return "You're eligible to donate right now.";
+  const last = donated.reduce((latest, d) => ((d.verifiedAt || 0) > (latest.verifiedAt || 0) ? d : latest), donated[0]);
+  if (!last?.verifiedAt) return "You're eligible to donate right now.";
+  const lastDate = new Date(last.verifiedAt);
   if (isNaN(lastDate.getTime())) return "You're eligible to donate right now.";
   const nextDate = new Date(lastDate);
   nextDate.setDate(nextDate.getDate() + 90);
@@ -2456,12 +2684,14 @@ export default function ProfilePage() {
               </Row>
 
               {/* Donation history row */}
-              <Row label="Donation history" isLast>
-                <p className="text-xs mb-2.5" style={{ color: C.sub, fontFamily: F }}>
-                  {nextEligibleText(user.donations)}
-                </p>
-                <DonationHistory donations={user.donations} />
-              </Row>
+              <div id="donation-history">
+                <Row label="Donation history" isLast>
+                  <p className="text-xs mb-2.5" style={{ color: C.sub, fontFamily: F }}>
+                    {nextEligibleText(user.donations)}
+                  </p>
+                  <DonationHistory donations={user.donations} />
+                </Row>
+              </div>
             </div>
           </>
         ) : (

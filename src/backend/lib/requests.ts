@@ -29,7 +29,8 @@ import {
   writeBatch,
   type Unsubscribe,
 } from "firebase/firestore";
-import { db } from "@/backend/lib/firebase";
+import { auth, db } from "@/backend/lib/firebase";
+import { getUserProfile } from "@/backend/lib/userProfile";
 import {
   encodeGeohash,
   encodeWideGeohash,
@@ -48,6 +49,11 @@ import type {
 } from "@/backend/types";
 
 export const SEARCH_RADIUS_KM = 25;
+
+/** Normalizes a city name for equality matching (case/whitespace only, not fuzzy). */
+export function normalizeCityKey(city: string): string {
+  return city.trim().toLowerCase().replace(/\s+/g, " ");
+}
 
 /* ---------------------------- geocoding --------------------------- */
 
@@ -103,6 +109,7 @@ interface ProfileForDonor {
   uid: string;
   email?: string;
   name?: string;
+  profilePhoto?: string | null;
   bloodType?: string;
   phone?: string;
   address?: AddressLike;
@@ -119,7 +126,9 @@ interface ProfileForDonor {
  */
 export async function syncDonorFromProfile(
   p: ProfileForDonor
-): Promise<{ ok: true; lat: number; lng: number } | { ok: false; reason: string }> {
+): Promise<
+  { ok: true; lat: number; lng: number; cityKey: string } | { ok: false; reason: string }
+> {
   if (!p.name?.trim()) return { ok: false, reason: "Add your name to your profile." };
   if (!p.bloodType) return { ok: false, reason: "Add your blood type to your profile." };
   if (!p.phone?.trim()) return { ok: false, reason: "Add your phone number to your profile." };
@@ -158,12 +167,16 @@ export async function syncDonorFromProfile(
   const publicDoc: Record<string, unknown> = {
     name: p.name.trim(),
     email: p.email ?? "",
+    profilePhoto: p.profilePhoto ?? null,
     bloodType: p.bloodType,
     lat: coords.lat,
     lng: coords.lng,
     geohash: encodeGeohash(coords.lat, coords.lng),
     geohashWide: encodeWideGeohash(coords.lat, coords.lng),
     city: p.address.city.trim(),
+    // Lowercased/trimmed so "Kanpur", "kanpur ", "KANPUR" all match on
+    // equality queries. `city` above stays as-typed for display.
+    cityKey: normalizeCityKey(p.address.city),
     addrKey,
     available: prev ? prev.available !== false : true,
     createdAt: prev ? prev.createdAt ?? now : now,
@@ -179,7 +192,7 @@ export async function syncDonorFromProfile(
   } satisfies DonorPrivate);
   await batch.commit();
 
-  return { ok: true, lat: coords.lat, lng: coords.lng };
+  return { ok: true, lat: coords.lat, lng: coords.lng, cityKey: publicDoc.cityKey as string };
 }
 
 /** Lets a donor pause/resume being listed without deleting anything. */
@@ -234,6 +247,7 @@ export const requestIdFor = (requesterUid: string, donorUid: string) =>
 export interface CreateRequestInput {
   requesterUid: string;
   requesterName: string;
+  requesterPhoto?: string | null;
   /** Shared with the donor only after they approve. */
   requesterPhone?: string;
   donor: DonorMatch;
@@ -243,6 +257,8 @@ export interface CreateRequestInput {
   hospital: string;
   lat: number;
   lng: number;
+  /** Requester's own city (from their profile), used for the city-wide feed. */
+  city: string;
 }
 
 /**
@@ -257,8 +273,10 @@ export async function createDonationRequest(input: CreateRequestInput): Promise<
   const request: Omit<DonationRequest, "id"> = {
     requesterUid: input.requesterUid,
     requesterName: input.requesterName,
+    requesterPhoto: input.requesterPhoto ?? null,
     donorUid: input.donor.uid,
     donorName: input.donor.name,
+    donorPhoto: input.donor.profilePhoto ?? null,
     bloodType: input.bloodType,
     units: input.units,
     urgent: input.urgent,
@@ -266,6 +284,8 @@ export async function createDonationRequest(input: CreateRequestInput): Promise<
     lat: input.lat,
     lng: input.lng,
     geohash: encodeGeohash(input.lat, input.lng),
+    city: input.city,
+    cityKey: normalizeCityKey(input.city),
     status: "pending",
     threadId: null,
     createdAt: now,
@@ -333,6 +353,69 @@ export function subscribeIncomingRequests(
 }
 
 /**
+ * Browse feed for Donate Blood.
+ *
+ * CITY IS A BACKEND VISIBILITY CONSTRAINT:
+ * every browse request must belong to the signed-in user's city.
+ *
+ * "ALL" means all blood groups, but still ONLY this city.
+ * "nearby" applies the distance filter in the UI after this city-scoped
+ * subscription has delivered the pending requests.
+ */
+export function subscribeCityPendingRequests(
+  cityKey: string,
+  bloodType: "ALL" | BloodType,
+  myUid: string,
+  cb: (rows: DonationRequest[]) => void,
+  onError?: (e: Error) => void
+): Unsubscribe {
+  return onSnapshot(
+    query(
+      collection(db, "requests"),
+      where("cityKey", "==", cityKey),
+      where("status", "==", "pending")
+    ),
+    (snap) => {
+      const rows = snap.docs
+        .map((d) => ({ id: d.id, ...d.data() }) as DonationRequest)
+        .filter(
+          (r) =>
+            r.donorUid !== myUid &&
+            r.requesterUid !== myUid &&
+            (bloodType === "ALL" || r.bloodType === bloodType)
+        );
+
+      cb(rows);
+    },
+    (e) => onError?.(e)
+  );
+}
+
+/**
+ * ALL pending requests, any city, excluding my own/addressed-to-me ones.
+ * Backs "All requests" mode. Firestore has no "not equal to two things"
+ * query, so this fetches every pending request and filters client-side —
+ * acceptable at RaktJaal's scale. If this ever needs to scale further,
+ * paginate with a createdAt cursor.
+ */
+export function subscribeAllPendingRequests(
+  myUid: string,
+  cb: (rows: DonationRequest[]) => void,
+  onError?: (e: Error) => void
+): Unsubscribe {
+  return onSnapshot(
+    query(collection(db, "requests"), where("status", "==", "pending")),
+    (snap) => {
+      const rows = snap.docs
+        .map((d) => ({ id: d.id, ...d.data() }) as DonationRequest)
+        .filter((r) => r.requesterUid !== myUid);
+      cb(rows);
+    },
+    (e) => onError?.(e)
+  );
+}
+
+/**
  * Donor approves: flips the request, opens the chat thread, and notifies the
  * requester. One atomic batch, so we never end up "approved" with no thread.
  */
@@ -344,11 +427,13 @@ export async function approveRequest(req: DonationRequest): Promise<void> {
   batch.update(doc(db, "requests", req.id), {
     status: "approved",
     threadId,
+    approvedAt: now,
     updatedAt: now,
   });
   batch.set(doc(db, "threads", threadId), {
     participants: [req.requesterUid, req.donorUid],
     names: { [req.requesterUid]: req.requesterName, [req.donorUid]: req.donorName },
+    photos: { [req.requesterUid]: req.requesterPhoto ?? null, [req.donorUid]: req.donorPhoto ?? null },
     context: `${req.bloodType} · ${req.hospital}`,
     requestId: req.id,
     unread: { [req.requesterUid]: 0, [req.donorUid]: 0 },
@@ -423,6 +508,59 @@ export async function cancelRequest(req: DonationRequest): Promise<void> {
  * only allow the read once the request is approved, so calling this early
  * simply returns null.
  */
+/**
+ * Called by EITHER side of an approved request to confirm the donation
+ * actually happened. This only ever writes the CALLER's own confirmation
+ * timestamp (donorConfirmedAt or requesterConfirmedAt) — a normal,
+ * rule-safe update to a document the caller is already a party to.
+ *
+ * It never writes to the other person's profile or flips donationVerified
+ * itself. After writing its own timestamp, it always pings the server route
+ * `/api/donation/verified`, which checks (server-side, with the Admin SDK)
+ * whether BOTH timestamps are now present, and if so does the privileged
+ * work atomically: flips donationVerified, writes both users' donation
+ * history, and emails both parties. Safe to call from both sides even if
+ * they race — the server route is idempotent (see its own comments).
+ */
+export async function confirmDonation(
+  req: DonationRequest,
+  byUid: string
+): Promise<void> {
+  if (req.status !== "approved") {
+    throw new Error("This request hasn't been approved yet.");
+  }
+
+  if (byUid !== req.donorUid && byUid !== req.requesterUid) {
+    throw new Error("You're not part of this request.");
+  }
+
+  const idToken = await auth.currentUser?.getIdToken();
+
+  if (!idToken) {
+    throw new Error("Your session has expired. Please sign in again.");
+  }
+
+  const response = await fetch("/api/donation/verified", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${idToken}`,
+    },
+    body: JSON.stringify({
+      requestId: req.id,
+    }),
+  });
+
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw new Error(
+      data?.error || "Couldn't confirm the donation."
+    );
+  }
+}
+
+
 export async function getContactPhone(requestId: string, otherUid: string): Promise<string | null> {
   try {
     const snap = await getDoc(doc(db, "requests", requestId, "contacts", otherUid));
@@ -497,6 +635,28 @@ export async function sendMessage(
     ...(other ? { [`unread.${other}`]: increment(1) } : {}),
   });
   await batch.commit();
+}
+
+/**
+ * Backfills the photos map on an older thread (created before threads
+ * stored photos) so its avatars stop falling back to initials. Best-effort
+ * and idempotent — safe to call every time a thread is opened.
+ */
+export async function backfillThreadPhotos(thread: ChatThread): Promise<void> {
+  try {
+    const missing = thread.participants.filter((uid) => thread.photos?.[uid] === undefined);
+    if (missing.length === 0) return;
+    const profiles = await Promise.all(missing.map((uid) => getUserProfile(uid)));
+    const patch: Record<string, string | null> = {};
+    missing.forEach((uid, i) => {
+      patch[uid] = profiles[i]?.profilePhoto ?? null;
+    });
+    await updateDoc(doc(db, "threads", thread.id), {
+      photos: { ...(thread.photos || {}), ...patch },
+    });
+  } catch (e) {
+    console.warn("Could not backfill thread photos:", e);
+  }
 }
 
 export async function markThreadRead(threadId: string, uid: string): Promise<void> {

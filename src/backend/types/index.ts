@@ -26,6 +26,8 @@ export interface Donor {
   uid: string;
   name: string;
   email: string;
+  /** Profile photo shown on signed-in donor/request cards. */
+  profilePhoto?: string | null;
   /**
    * Legacy: written by /donor/signup. Docs created by the main app flow
    * (syncDonorFromProfile) deliberately leave this empty and keep the number
@@ -43,6 +45,8 @@ export interface Donor {
   geohashWide?: string;
   /** City shown on donor cards. */
   city?: string;
+  /** Normalized (lowercased/trimmed) city, used for equality queries. */
+  cityKey?: string;
   /** Donor can switch themselves off without deleting their profile. */
   available?: boolean;
   updatedAt?: number;
@@ -83,8 +87,10 @@ export interface DonationRequest {
   id: string;
   requesterUid: string;
   requesterName: string;
+  requesterPhoto?: string | null;
   donorUid: string;
   donorName: string;
+  donorPhoto?: string | null;
   bloodType: BloodType;
   units: number;
   urgent: boolean;
@@ -92,11 +98,27 @@ export interface DonationRequest {
   lat: number;
   lng: number;
   geohash: string;
+  /** City the request was made from (requester's own profile city, as typed). */
+  city: string;
+  /** Normalized city, used to query "all requests in my city". */
+  cityKey: string;
   status: DonationRequestStatus;
   /** Set once approved; equals the request id. */
   threadId?: string | null;
+  /** Set once the donor approves the request. */
+  approvedAt?: number;
   createdAt: number;
   updatedAt: number;
+  /**
+   * Set once BOTH the donor and requester have confirmed the donation
+   * actually happened. Until then this is absent/false, even if one side
+   * has already confirmed (see donorConfirmedAt / requesterConfirmedAt).
+   */
+  donationVerified?: boolean;
+  donationVerifiedAt?: number;
+  /** Timestamp each side confirmed, independently. Either can confirm first. */
+  donorConfirmedAt?: number;
+  requesterConfirmedAt?: number;
 }
 
 /** Thread participants are exactly the two people on the request. */
@@ -104,6 +126,8 @@ export interface ChatThread {
   id: string;
   participants: [string, string];
   names: Record<string, string>;
+  /** uid -> profile photo (data URL or null), so chat avatars show real photos. */
+  photos?: Record<string, string | null>;
   context: string;
   requestId: string;
   lastMessage?: string;
@@ -140,4 +164,34 @@ export interface DonorPrivate {
   uid: string;
   phone: string;
   updatedAt: number;
+}
+
+/**
+ * One completed, mutually-verified donation, written into the profile of
+ * BOTH people once donationVerified flips true on the underlying request.
+ * `role` tells the profile which side this person was on, so "Donated" and
+ * "Received" can be shown as separate logs from the same array.
+ */
+export interface DonationLogEntry {
+  requestId: string;
+  role: "donor" | "requester";
+  /** The OTHER person on this donation. */
+  counterpartUid: string;
+  counterpartName: string;
+  /** Snapshot of the counterpart's profile photo and phone at verification
+   *  time, so the history detail view can show them without another read. */
+  counterpartPhoto?: string | null;
+  counterpartPhone?: string | null;
+  bloodType: BloodType;
+  units: number;
+  hospital: string;
+  city: string;
+  lat: number;
+  lng: number;
+  /** When the request was first created. */
+  requestedAt?: number;
+  /** When the donor approved the request (chat/contact opened up). */
+  acceptedAt?: number;
+  /** When BOTH sides had confirmed the donation actually happened. */
+  verifiedAt: number;
 }
