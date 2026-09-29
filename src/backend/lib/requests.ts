@@ -5,6 +5,8 @@
      donors_private/{uid}         phone, released only after approval
      requests/{requesterUid}_{donorUid}
                                   one person asking one donor for blood
+     requests/{requesterUid}_open_{ts}
+                                  OPEN request, donorUid null until a donor accepts
      threads/{requestId}          chat between the two, created on approval
      threads/{id}/messages/{mid}  the messages
      notifications/{id}           per-user notifications
@@ -49,6 +51,17 @@ import type {
 } from "@/backend/types";
 
 export const SEARCH_RADIUS_KM = 25;
+
+/**
+ * Profile photos are stored as base64 data URLs (up to ~530 KB each). A request
+ * doc embeds two of them and a Firestore doc is capped at 1 MiB, so two large
+ * photos made the write fail outright. Only inline a photo when it is small;
+ * otherwise store null and the UI falls back to initials.
+ */
+const MAX_INLINE_PHOTO_CHARS = 120 * 1024;
+export function safePhoto(photo?: string | null): string | null {
+  return photo && photo.length <= MAX_INLINE_PHOTO_CHARS ? photo : null;
+}
 
 /** Normalizes a city name for equality matching (case/whitespace only, not fuzzy). */
 export function normalizeCityKey(city: string): string {
@@ -273,10 +286,10 @@ export async function createDonationRequest(input: CreateRequestInput): Promise<
   const request: Omit<DonationRequest, "id"> = {
     requesterUid: input.requesterUid,
     requesterName: input.requesterName,
-    requesterPhoto: input.requesterPhoto ?? null,
+    requesterPhoto: safePhoto(input.requesterPhoto),
     donorUid: input.donor.uid,
     donorName: input.donor.name,
-    donorPhoto: input.donor.profilePhoto ?? null,
+    donorPhoto: safePhoto(input.donor.profilePhoto),
     bloodType: input.bloodType,
     units: input.units,
     urgent: input.urgent,
@@ -338,6 +351,147 @@ async function publishOwnContact(requestId: string, uid: string, phone?: string)
     });
   } catch (e) {
     console.warn("Could not publish contact number:", e);
+  }
+}
+
+export interface CreateOpenRequestInput {
+  requesterUid: string;
+  requesterName: string;
+  requesterPhoto?: string | null;
+  requesterPhone?: string;
+  bloodType: BloodType;
+  units: number;
+  urgent: boolean;
+  hospital: string;
+  lat: number;
+  lng: number;
+  city: string;
+  /** Matching donors nearby who should get an in-app notification. */
+  notifyDonorUids?: string[];
+  /** The requester's own still-pending open requests; superseded by this one. */
+  supersede?: DonationRequest[];
+}
+
+/**
+ * Publishes an OPEN request: not addressed to any one donor. It is written the
+ * moment the requester submits, whether or not any donor is registered nearby,
+ * so it always exists in Firestore and every signed-in user can see it while it
+ * is pending. Any donor with the same blood type can accept it (acceptOpenRequest).
+ * donorUid stays null until someone accepts.
+ */
+export async function createOpenRequest(input: CreateOpenRequestInput): Promise<string> {
+  const now = Date.now();
+  const id = `${input.requesterUid}_open_${now}`;
+
+  const request: Omit<DonationRequest, "id"> = {
+    requesterUid: input.requesterUid,
+    requesterName: input.requesterName,
+    requesterPhoto: safePhoto(input.requesterPhoto),
+    donorUid: null,
+    donorName: null,
+    donorPhoto: null,
+    bloodType: input.bloodType,
+    units: input.units,
+    urgent: input.urgent,
+    hospital: input.hospital,
+    lat: input.lat,
+    lng: input.lng,
+    geohash: encodeGeohash(input.lat, input.lng),
+    city: input.city,
+    cityKey: normalizeCityKey(input.city),
+    status: "pending",
+    threadId: null,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  const batch = writeBatch(db);
+
+  // One live open request per person: withdraw the previous one so the feed
+  // never fills up with stale duplicates when someone edits and resubmits.
+  for (const old of input.supersede ?? []) {
+    if (!old.donorUid && old.status === "pending") {
+      batch.update(doc(db, "requests", old.id), { status: "cancelled", updatedAt: now });
+    }
+  }
+
+  batch.set(doc(db, "requests", id), request);
+
+  const uids = Array.from(new Set(input.notifyDonorUids ?? []))
+    .filter((u) => u && u !== input.requesterUid)
+    .slice(0, 20);
+  for (const uid of uids) {
+    batch.set(doc(collection(db, "notifications")), {
+      uid,
+      title: input.urgent ? "Urgent blood request nearby" : "New blood request nearby",
+      body: `${input.requesterName} needs ${input.bloodType} blood at ${input.hospital}.`,
+      tone: "info",
+      read: false,
+      createdAt: now,
+    } satisfies Omit<AppNotification, "id">);
+  }
+  await batch.commit();
+
+  await publishOwnContact(id, input.requesterUid, input.requesterPhone);
+  return id;
+}
+
+/**
+ * A donor accepts an OPEN request. One atomic batch: claim the request (rules
+ * only allow this while donorUid is still null and the status is pending, so
+ * two donors racing can't both win), open the chat thread, notify the requester.
+ */
+export async function acceptOpenRequest(
+  req: DonationRequest,
+  donor: { uid: string; name: string; photo?: string | null }
+): Promise<void> {
+  const now = Date.now();
+  const threadId = req.id;
+  const donorPhoto = safePhoto(donor.photo);
+  const batch = writeBatch(db);
+
+  batch.update(doc(db, "requests", req.id), {
+    status: "approved",
+    threadId,
+    approvedAt: now,
+    updatedAt: now,
+    donorUid: donor.uid,
+    donorName: donor.name,
+    donorPhoto,
+  });
+  batch.set(doc(db, "threads", threadId), {
+    participants: [req.requesterUid, donor.uid],
+    names: { [req.requesterUid]: req.requesterName, [donor.uid]: donor.name },
+    photos: { [req.requesterUid]: safePhoto(req.requesterPhoto), [donor.uid]: donorPhoto },
+    context: `${req.bloodType} · ${req.hospital}`,
+    requestId: req.id,
+    unread: { [req.requesterUid]: 0, [donor.uid]: 0 },
+    createdAt: now,
+  } satisfies Omit<ChatThread, "id">);
+  batch.set(doc(collection(db, "notifications")), {
+    uid: req.requesterUid,
+    title: `${donor.name} accepted your request`,
+    body: "You can now message or call them directly.",
+    tone: "success",
+    read: false,
+    createdAt: now,
+  } satisfies Omit<AppNotification, "id">);
+
+  try {
+    await batch.commit();
+  } catch (e) {
+    if ((e as { code?: string })?.code === "permission-denied") {
+      throw new Error("Someone else already accepted this request, or it was withdrawn.");
+    }
+    throw e;
+  }
+
+  try {
+    const mine = await getDoc(doc(db, "donors_private", donor.uid));
+    const phone = mine.exists() ? (mine.data() as DonorPrivate).phone : undefined;
+    await publishOwnContact(req.id, donor.uid, phone);
+  } catch (e) {
+    console.warn("Could not publish donor contact number:", e);
   }
 }
 
@@ -428,6 +582,9 @@ export function subscribeAllPendingRequests(
  * requester. One atomic batch, so we never end up "approved" with no thread.
  */
 export async function approveRequest(req: DonationRequest): Promise<void> {
+  if (!req.donorUid) throw new Error("This is an open request; use acceptOpenRequest.");
+  const donorUid = req.donorUid;
+  const donorName = req.donorName ?? "Donor";
   const now = Date.now();
   const threadId = req.id;
   const batch = writeBatch(db);
@@ -439,17 +596,17 @@ export async function approveRequest(req: DonationRequest): Promise<void> {
     updatedAt: now,
   });
   batch.set(doc(db, "threads", threadId), {
-    participants: [req.requesterUid, req.donorUid],
-    names: { [req.requesterUid]: req.requesterName, [req.donorUid]: req.donorName },
-    photos: { [req.requesterUid]: req.requesterPhoto ?? null, [req.donorUid]: req.donorPhoto ?? null },
+    participants: [req.requesterUid, donorUid],
+    names: { [req.requesterUid]: req.requesterName, [donorUid]: donorName },
+    photos: { [req.requesterUid]: safePhoto(req.requesterPhoto), [donorUid]: safePhoto(req.donorPhoto) },
     context: `${req.bloodType} · ${req.hospital}`,
     requestId: req.id,
-    unread: { [req.requesterUid]: 0, [req.donorUid]: 0 },
+    unread: { [req.requesterUid]: 0, [donorUid]: 0 },
     createdAt: now,
   } satisfies Omit<ChatThread, "id">);
   batch.set(doc(collection(db, "notifications")), {
     uid: req.requesterUid,
-    title: `${req.donorName} approved your request`,
+    title: `${donorName} approved your request`,
     body: "You can now message or call them directly.",
     tone: "success",
     read: false,
@@ -460,9 +617,9 @@ export async function approveRequest(req: DonationRequest): Promise<void> {
   // Donor's number is released to the requester now that they've approved.
   // Uses the private copy kept from the profile sync.
   try {
-    const mine = await getDoc(doc(db, "donors_private", req.donorUid));
+    const mine = await getDoc(doc(db, "donors_private", donorUid));
     const phone = mine.exists() ? (mine.data() as DonorPrivate).phone : undefined;
-    await publishOwnContact(req.id, req.donorUid, phone);
+    await publishOwnContact(req.id, donorUid, phone);
   } catch (e) {
     console.warn("Could not publish donor contact number:", e);
   }
@@ -475,7 +632,7 @@ export async function declineRequest(req: DonationRequest): Promise<void> {
   batch.set(doc(collection(db, "notifications")), {
     uid: req.requesterUid,
     title: "Request declined",
-    body: `${req.donorName} can't donate right now. Try another donor.`,
+    body: `${req.donorName ?? "The donor"} can't donate right now. Try another donor.`,
     tone: "info",
     read: false,
     createdAt: now,
@@ -491,14 +648,17 @@ export async function reopenRequest(req: DonationRequest): Promise<void> {
   const now = Date.now();
   const batch = writeBatch(db);
   batch.update(doc(db, "requests", req.id), { status: "pending", updatedAt: now });
-  batch.set(doc(collection(db, "notifications")), {
-    uid: req.donorUid,
-    title: req.urgent ? "Urgent blood request" : "New blood request",
-    body: `${req.requesterName} needs ${req.bloodType} blood at ${req.hospital}.`,
-    tone: "info",
-    read: false,
-    createdAt: now,
-  } satisfies Omit<AppNotification, "id">);
+  // Open requests have no addressed donor; they just go back on the public feed.
+  if (req.donorUid) {
+    batch.set(doc(collection(db, "notifications")), {
+      uid: req.donorUid,
+      title: req.urgent ? "Urgent blood request" : "New blood request",
+      body: `${req.requesterName} needs ${req.bloodType} blood at ${req.hospital}.`,
+      tone: "info",
+      read: false,
+      createdAt: now,
+    } satisfies Omit<AppNotification, "id">);
+  }
   await batch.commit();
 }
 

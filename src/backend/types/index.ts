@@ -88,8 +88,9 @@ export interface DonationRequest {
   requesterUid: string;
   requesterName: string;
   requesterPhoto?: string | null;
-  donorUid: string;
-  donorName: string;
+  /** null for an OPEN request until a donor accepts it. */
+  donorUid: string | null;
+  donorName: string | null;
   donorPhoto?: string | null;
   bloodType: BloodType;
   units: number;

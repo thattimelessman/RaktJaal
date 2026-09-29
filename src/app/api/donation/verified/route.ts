@@ -48,10 +48,15 @@ export async function POST(request: Request) {
         throw new Error("Request not found.");
       }
 
+      // Approved requests always have a donor (open requests get one when accepted).
       const req = {
         id: reqSnap.id,
         ...reqSnap.data(),
-      } as DonationRequest;
+      } as DonationRequest & { donorUid: string; donorName: string };
+
+      if (!req.donorUid) {
+        throw new Error("This request hasn't been accepted by a donor yet.");
+      }
 
       if (decoded.uid !== req.donorUid && decoded.uid !== req.requesterUid) {
         throw new Error("You're not part of this request.");
@@ -304,4 +309,4 @@ export async function POST(request: Request) {
       { status }
     );
   }
-}
+}

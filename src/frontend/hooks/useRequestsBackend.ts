@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  acceptOpenRequest,
   approveRequest,
   declineRequest,
   cancelRequest,
@@ -141,6 +142,17 @@ export function useRequestsBackend(profile: ProfileLike | null, profileComplete:
 
   const approve = useCallback((req: DonationRequest) => approveRequest(req), []);
   const decline = useCallback((req: DonationRequest) => declineRequest(req), []);
+  const acceptOpen = useCallback(
+    (req: DonationRequest) => {
+      if (!profile) return Promise.reject(new Error("Please sign in again."));
+      return acceptOpenRequest(req, {
+        uid: profile.uid,
+        name: profile.name || "A donor",
+        photo: profile.profilePhoto ?? null,
+      });
+    },
+    [profile]
+  );
   const cancel = useCallback((req: DonationRequest) => cancelRequest(req), []);
   const reopen = useCallback((req: DonationRequest) => reopenRequest(req), []);
 
@@ -173,6 +185,7 @@ export function useRequestsBackend(profile: ProfileLike | null, profileComplete:
     error,
     approve,
     decline,
+    acceptOpen,
     cancel,
     reopen,
     send,

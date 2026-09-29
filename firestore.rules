@@ -62,15 +62,28 @@ service cloud.firestore {
       || resource.data.status == 'pending'
     );
 
-  // Requester creates their own pending request.
+  // Requester creates their own pending request. Two shapes:
+  //  - DIRECT: addressed to one donor, id = requesterUid_donorUid
+  //  - OPEN:   donorUid == null, id = requesterUid_open_<timestamp>; any donor
+  //            with the matching blood type can accept it later.
   allow create: if signedIn()
     && request.resource.data.requesterUid == request.auth.uid
-    && request.resource.data.donorUid != request.auth.uid
-    && requestId == request.auth.uid + '_' + request.resource.data.donorUid
     && request.resource.data.status == 'pending'
     && request.resource.data.units is int
     && request.resource.data.units >= 1
-    && request.resource.data.units <= 20;
+    && request.resource.data.units <= 20
+    && (
+      (
+        request.resource.data.donorUid is string
+        && request.resource.data.donorUid != request.auth.uid
+        && requestId == request.auth.uid + '_' + request.resource.data.donorUid
+      )
+      ||
+      (
+        request.resource.data.donorUid == null
+        && requestId.matches(request.auth.uid + '_open_[0-9]+')
+      )
+    );
 
   // Status transitions.
   allow update: if signedIn()
@@ -102,6 +115,19 @@ service cloud.firestore {
         && request.resource.data.status == 'pending'
       )
     );
+
+  // A donor accepts an OPEN request: claims it (donorUid null -> me) and
+  // approves it in one write. Only while pending and unclaimed, so two donors
+  // racing can't both win. The donor's blood type must match the request.
+  allow update: if signedIn()
+    && request.resource.data.diff(resource.data).affectedKeys()
+         .hasOnly(['status', 'threadId', 'approvedAt', 'updatedAt', 'donorUid', 'donorName', 'donorPhoto'])
+    && resource.data.donorUid == null
+    && resource.data.status == 'pending'
+    && resource.data.requesterUid != request.auth.uid
+    && request.resource.data.donorUid == request.auth.uid
+    && request.resource.data.status == 'approved'
+    && get(/databases/$(database)/documents/donors/$(request.auth.uid)).data.bloodType == resource.data.bloodType;
 
   allow delete: if false;
 
@@ -145,11 +171,26 @@ service cloud.firestore {
       // 'approved'. Inside a batch, get()/exists() see the state from BEFORE the
       // batch, so the request is still 'pending' here. Do NOT add a status check to
       // this rule, or approving will start failing with permission-denied.
+      // For an OPEN request the donor is not on the request yet at this point
+      // (donorUid is still null pre-batch), so accept: the caller is a
+      // participant, the other participant is the requester, and the request
+      // is still unclaimed.
       allow create: if signedIn()
         && request.auth.uid in request.resource.data.participants
         && request.resource.data.participants.size() == 2
         && exists(/databases/$(database)/documents/requests/$(threadId))
-        && get(/databases/$(database)/documents/requests/$(threadId)).data.donorUid == request.auth.uid;
+        && (
+          get(/databases/$(database)/documents/requests/$(threadId)).data.donorUid == request.auth.uid
+          ||
+          (
+            get(/databases/$(database)/documents/requests/$(threadId)).data.donorUid == null
+            && get(/databases/$(database)/documents/requests/$(threadId)).data.status == 'pending'
+            && request.resource.data.participants.hasAll([
+                 get(/databases/$(database)/documents/requests/$(threadId)).data.requesterUid,
+                 request.auth.uid
+               ])
+          )
+        );
 
       // Participants may update last-message + unread counters only.
       allow update: if signedIn()

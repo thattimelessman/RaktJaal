@@ -31,6 +31,9 @@ export async function POST(request: Request) {
     if (decoded.uid !== req.requesterUid) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     if (req.requestEmailSentAt) return NextResponse.json({ ok: true, alreadySent: true });
 
+    // Open (broadcast) requests aren't addressed to anyone, so there's no one to email.
+    if (!req.donorUid) return NextResponse.json({ ok: true, skipped: "open-request" });
+
     const mailer = getMailer();
     if (!mailer) return NextResponse.json({ ok: true, skipped: "smtp-not-configured" });
 
@@ -38,7 +41,7 @@ export async function POST(request: Request) {
     if (!donor.email) return NextResponse.json({ ok: true, skipped: "no-donor-email" });
 
     const { subject, text, html } = requestReceivedEmail({
-      donorName: req.donorName,
+      donorName: req.donorName ?? "there",
       requesterName: req.requesterName,
       bloodType: req.bloodType,
       units: req.units,

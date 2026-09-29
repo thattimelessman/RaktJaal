@@ -8,11 +8,11 @@ import { getUserProfile } from "@/backend/lib/userProfile";
 import { useRequestsBackend } from "@/frontend/hooks/useRequestsBackend";
 import {
   createDonationRequest,
+  createOpenRequest,
   findNearbyDonors,
   getContactPhone,
   subscribeMessages,
   subscribeAllPendingRequests,
-  subscribeCityPendingRequests,
   confirmDonation,
   timeAgo,
   MAX_INLINE_ATTACHMENT_BYTES,
@@ -1204,6 +1204,62 @@ function NeedBloodFlow({ me, sent, donorSync, onSent, onCancel, onReopen, onOpen
     }
   };
 
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState("");
+
+  // The person's live OPEN request (not addressed to one donor). Newest first.
+  const openRequest = useMemo(
+    () => [...sent].filter((r) => !r.donorUid).sort((a, b) => (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt))[0] || null,
+    [sent]
+  );
+
+  // "Find donors" now PUBLISHES the request to Firestore first, so it exists (and
+  // shows up for other users) even when no donor is registered nearby. Previously
+  // a request was only written when a specific donor card was tapped, so an empty
+  // search wrote nothing at all.
+  const submitRequest = async () => {
+    const requesterCity = (me.address?.city || "").trim();
+    if (!requesterCity) {
+      setSubmitError("Your profile is missing a city. Go to Profile → Address and save it first.");
+      return;
+    }
+    setSubmitting(true);
+    setSubmitError("");
+    try {
+      let nearby = [];
+      try {
+        nearby = await findNearbyDonors(bloodType, coords.lat, coords.lng, me.uid);
+      } catch {
+        /* notifying nearby donors is best-effort; the request itself is what matters */
+      }
+      await createOpenRequest({
+        requesterUid: me.uid,
+        requesterName: me.name || "Someone",
+        requesterPhoto: me.profilePhoto ?? null,
+        requesterPhone: me.phone,
+        bloodType,
+        units,
+        urgent,
+        hospital: hospital.trim() || location,
+        lat: coords.lat,
+        lng: coords.lng,
+        city: requesterCity,
+        notifyDonorUids: nearby.map((d) => d.uid),
+        supersede: sent.filter((r) => !r.donorUid && r.status === "pending"),
+      });
+      setStep("results");
+    } catch (e) {
+      console.error("createOpenRequest failed:", e);
+      setSubmitError(
+        e?.code === "permission-denied"
+          ? "The server refused this request (permission denied). Make sure the latest Firestore rules are deployed."
+          : e?.message || "Couldn't publish your request. Please try again."
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   const matchingDonors = donors;
 
   if (step === "type") {
@@ -1379,13 +1435,17 @@ function NeedBloodFlow({ me, sent, donorSync, onSent, onCancel, onReopen, onOpen
               <span className="text-sm" style={{ color: C.ink, fontFamily: F, fontWeight: 600 }}>This is urgent</span>
             </label>
 
+            {submitError && (
+              <p className="text-xs px-4 py-2.5 rounded-xl" style={{ background: C.brickTint, color: C.brickDark, fontFamily: F }}>{submitError}</p>
+            )}
+
             <button
-              onClick={() => setStep("results")}
-              disabled={!canGo}
+              onClick={submitRequest}
+              disabled={!canGo || submitting}
               className="mt-2 px-6 py-3 rounded-full text-sm text-white flex items-center justify-center gap-1.5 transition-opacity"
-              style={{ background: C.ink, fontFamily: F, fontWeight: 600, opacity: canGo ? 1 : 0.35 }}
+              style={{ background: C.ink, fontFamily: F, fontWeight: 600, opacity: canGo && !submitting ? 1 : 0.35 }}
             >
-              Find donors <ChevronRight size={15} />
+              {submitting ? "Posting your request…" : <>Post request &amp; find donors <ChevronRight size={15} /></>}
             </button>
           </div>
         </div>
@@ -1413,6 +1473,55 @@ function NeedBloodFlow({ me, sent, donorSync, onSent, onCancel, onReopen, onOpen
       </div>
 
       <div className="flex-1 overflow-y-auto rk-scroll px-6 py-4 sm:px-8 flex flex-col gap-2.5">
+        {openRequest && (
+          <div className="px-4 py-3.5 rounded-2xl flex items-center gap-3 flex-wrap" style={{ background: C.sidebar, border: `1px solid ${C.border}` }}>
+            <div className="min-w-0 flex-1">
+              <p className="text-[13px] font-bold flex items-center gap-1.5 flex-wrap" style={{ color: C.ink, fontFamily: F }}>
+                Your request
+                <BloodTypeBadge type={openRequest.bloodType} />
+                {openRequest.urgent && <Pill tone="urgent">Urgent</Pill>}
+              </p>
+              <p className="text-[12px] mt-0.5" style={{ color: C.sub, fontFamily: F }}>
+                {openRequest.status === "pending" && `Live now: any ${openRequest.bloodType} donor can see and accept it · ${openRequest.units} unit${openRequest.units > 1 ? "s" : ""} at ${openRequest.hospital}`}
+                {openRequest.status === "approved" && `${openRequest.donorName || "A donor"} accepted your request. You can now message or call them.`}
+                {openRequest.status === "cancelled" && "You cancelled this request. It is no longer visible to donors."}
+                {openRequest.status === "declined" && "This request was declined."}
+              </p>
+            </div>
+            {openRequest.status === "pending" && (
+              <button onClick={() => onCancel(openRequest)} className="text-[11px] px-3 py-2 rounded-full transition-colors hover:bg-[#F4F4F5]" style={{ border: `1px solid ${C.border}`, color: C.ink, fontFamily: F, fontWeight: 600 }}>
+                Cancel request
+              </button>
+            )}
+            {openRequest.status === "cancelled" && (
+              <button onClick={() => onReopen(openRequest)} className="text-[11px] px-3 py-2 rounded-full text-white" style={{ background: C.brick, fontFamily: F, fontWeight: 700 }}>
+                Post again
+              </button>
+            )}
+            {openRequest.status === "approved" && (
+              <div className="flex items-center gap-2 flex-wrap">
+                <button onClick={() => openRequest.threadId && onOpenThread(openRequest.threadId)} className="flex items-center gap-1.5 text-xs px-3.5 py-2 rounded-full transition-colors hover:bg-white" style={{ border: `1px solid ${C.border}`, color: C.ink, fontFamily: F, fontWeight: 700 }}>
+                  <MessageCircle size={13} /> Message
+                </button>
+                {openRequest.donationVerified ? (
+                  <span className="inline-flex items-center gap-1.5 text-[11px] px-2.5 py-1.5 rounded-full" style={{ background: "#DEF5E4", color: "#1F6B3A", fontFamily: F, fontWeight: 700 }}>
+                    <BadgeCheck size={12} /> Donation verified
+                  </span>
+                ) : (
+                  <button
+                    onClick={() => handleConfirmDonation(openRequest)}
+                    disabled={confirmingId === openRequest.id || Boolean(openRequest.requesterConfirmedAt)}
+                    className="flex items-center gap-1.5 text-[11px] px-3 py-2 rounded-full disabled:opacity-60"
+                    style={{ background: openRequest.requesterConfirmedAt ? C.chip : C.ink, color: openRequest.requesterConfirmedAt ? C.sub : "#fff", fontFamily: F, fontWeight: 700 }}
+                  >
+                    <BadgeCheck size={12} />
+                    {confirmingId === openRequest.id ? "Confirming…" : openRequest.requesterConfirmedAt ? "You confirmed the donation" : "Confirm donation happened"}
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        )}
         {sendError && (
           <p className="text-xs px-4 py-2.5 rounded-xl" style={{ background: C.brickTint, color: C.brickDark, fontFamily: F }}>{sendError}</p>
         )}
@@ -1422,7 +1531,7 @@ function NeedBloodFlow({ me, sent, donorSync, onSent, onCancel, onReopen, onOpen
           <p className="text-sm text-center py-10" style={{ color: C.sub, fontFamily: F }}>Looking for donors near you…</p>
         ) : matchingDonors.length === 0 ? (
           <p className="text-sm text-center py-10" style={{ color: C.sub, fontFamily: F }}>
-            No registered {bloodType} donors within 25 km yet. As more people join, they'll appear here.
+            No registered {bloodType} donors within 25 km right now. Your request is still posted, and anyone who joins or opens RaktJaal nearby will see it.
           </p>
         ) : (
           matchingDonors.map((d) => {
@@ -1707,7 +1816,7 @@ function IncomingRequestCard({ r, distanceKm, onApprove, onDecline, onOpenThread
 /* Read-only browse card for a request NOT addressed to me (city/all-requests
    feeds) — no approve/decline, since only the requester's chosen donor can
    act on it; this is purely "so you know it's out there". */
-function BrowseRequestCard({ r, distanceKm }) {
+function BrowseRequestCard({ r, distanceKm, canAccept, accepting, onAccept }) {
   const initials = (r.requesterName || "?").split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase();
   return (
     <div
@@ -1735,13 +1844,23 @@ function BrowseRequestCard({ r, distanceKm }) {
           <span className="text-xs" style={{ color: C.faint, fontFamily: F }}>{timeAgo(r.createdAt)}</span>
         </div>
       </div>
+      {canAccept && (
+        <button
+          onClick={onAccept}
+          disabled={accepting}
+          className="shrink-0 text-xs px-3.5 py-2 rounded-full text-white transition-opacity hover:opacity-85 disabled:opacity-50"
+          style={{ background: C.brick, fontFamily: F, fontWeight: 700 }}
+        >
+          {accepting ? "Accepting…" : "I can donate"}
+        </button>
+      )}
     </div>
   );
 }
 
 const DISTANCE_OPTIONS = [10, 25, 50, 100];
 
-function DonateBloodFlow({ me, incoming, donorSync, onApprove, onDecline, onOpenThread }) {
+function DonateBloodFlow({ me, incoming, donorSync, onApprove, onDecline, onAcceptOpen, onOpenThread }) {
   const [showMapFor, setShowMapFor] = useState(null); // request id
   const [busyId, setBusyId] = useState(null);
   const [actionError, setActionError] = useState("");
@@ -1757,7 +1876,6 @@ function DonateBloodFlow({ me, incoming, donorSync, onApprove, onDecline, onOpen
 
   const myPos = donorSync.status === "ready" ? { lat: donorSync.lat, lng: donorSync.lng } : null;
   const distanceOf = (r) => (myPos ? haversineKm(myPos.lat, myPos.lng, r.lat, r.lng) : null);
-  const myCityKey = (me.address?.city || "").trim().toLowerCase().replace(/\s+/g, " ");
 
   // Everything in `incoming` is already addressed to this donor (the query and
   // the security rules both enforce that). Withdrawn requests stay visible with
@@ -1803,15 +1921,13 @@ function DonateBloodFlow({ me, incoming, donorSync, onApprove, onDecline, onOpen
       setBrowseLoading(false);
     };
 
-    let unsub;
-    if (myCityKey) {
-      unsub = subscribeCityPendingRequests(myCityKey, me.uid, onRows, onErr);
-    } else {
-      unsub = subscribeAllPendingRequests(me.uid, onRows, onErr);
-    }
-
+    // Deliberately NOT scoped by a city string: `city` comes from the PIN-code
+    // locality (e.g. "Arya Nagar (Kanpur Nagar)"), so two people in the same
+    // city routinely have different values and would never see each other.
+    // Distance is handled client-side for "Nearby".
+    const unsub = subscribeAllPendingRequests(me.uid, onRows, onErr);
     return () => unsub && unsub();
-  }, [browseMode, me.uid, myCityKey]);
+  }, [browseMode, me.uid]);
 
   const browseSorted = useMemo(() => {
     let rows = browseRows;
@@ -2009,7 +2125,19 @@ function DonateBloodFlow({ me, incoming, donorSync, onApprove, onDecline, onOpen
           </p>
         ) : (
           browseSorted.map((r) => (
-            <BrowseRequestCard key={r.id} r={r} distanceKm={distanceOf(r)} />
+            <BrowseRequestCard
+              key={r.id}
+              r={r}
+              distanceKm={distanceOf(r)}
+              canAccept={!r.donorUid && r.status === "pending" && Boolean(me.bloodType) && me.bloodType === r.bloodType && donorSync.status === "ready"}
+              accepting={busyId === r.id}
+              onAccept={() =>
+                run(r.id, async () => {
+                  await onAcceptOpen(r);
+                  setBrowseMode("mine");
+                })
+              }
+            />
           ))
         )}
       </div>
@@ -2426,6 +2554,7 @@ function ActionPageInner() {
             donorSync={backend.donorSync}
             onApprove={backend.approve}
             onDecline={backend.decline}
+            onAcceptOpen={backend.acceptOpen}
             onOpenThread={handleOpenThread}
           />
         ) : (
