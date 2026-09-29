@@ -3,6 +3,7 @@ import { adminAuth } from "@/backend/lib/firebaseAdmin";
 import { createEmailOtp } from "@/backend/lib/emailOtp";
 import { otpEmail } from "@/backend/lib/emailTemplates";
 import { getMailer, safeDecode } from "@/backend/lib/mailer";
+import { renderOtpHero } from "@/backend/lib/otpHero";
 
 export const runtime = "nodejs";
 
@@ -35,7 +36,18 @@ export async function POST(request: Request) {
     }
 
     const { subject, text, html } = otpEmail({ code, purpose, ip, location, time });
-    await mailer.transporter.sendMail({ from: mailer.from, to: user.email, subject, text, html });
+    // Hero illustration with THIS code drawn into its boxes (null => static fallback).
+    const heroPng = await renderOtpHero(code);
+    await mailer.transporter.sendMail({
+      from: mailer.from,
+      to: user.email,
+      subject,
+      text,
+      html,
+      attachments: heroPng
+        ? [{ filename: "rj-hero-otp.png", content: heroPng, cid: "rj-hero-otp", contentType: "image/png", contentDisposition: "inline" }]
+        : undefined,
+    });
 
     return NextResponse.json({ ok: true });
   } catch (err) {

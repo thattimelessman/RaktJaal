@@ -22,7 +22,8 @@ export function getMailer() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   transporter.use("compile", (mail: any, done: (err?: Error | null) => void) => {
     const html = typeof mail.data.html === "string" ? mail.data.html : "";
-    const used = Object.keys(EMAIL_ASSETS).filter((id) => html.includes(`cid:${id}"`));
+    const supplied = new Set((mail.data.attachments || []).map((a: { cid?: string }) => a.cid));
+    const used = Object.keys(EMAIL_ASSETS).filter((id) => html.includes(`cid:${id}"`) && !supplied.has(id));
     if (used.length) {
       mail.data.attachments = [
         ...(mail.data.attachments || []),

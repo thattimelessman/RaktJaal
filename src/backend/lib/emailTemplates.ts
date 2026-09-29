@@ -170,6 +170,7 @@ export function otpEmail(o: { code: string; purpose: OtpPurpose; ip?: string; lo
       body:
         p(c.lead) +
         `<div style="margin:6px 0 22px;"><span style="display:inline-block;background:${PAGE_BG};border-radius:14px;padding:16px 26px 16px 34px;font-family:'SF Mono',Menlo,Consolas,'Courier New',monospace;font-size:34px;line-height:1;font-weight:700;letter-spacing:8px;color:${INK};">${esc(o.code)}</span></div>` +
+        `<p style="margin:-10px 0 16px;font-size:12px;color:${MUTED};">Tip: double-click (or long-press) the code to copy it.</p>` +
         p(`<span style="font-size:12px;color:${MUTED};">Requested from ${origin}. Didn't request this? You can safely ignore this email — the code expires in 10 minutes.</span>`),
       preheader: `${o.code} ${c.subject}`,
     }),
