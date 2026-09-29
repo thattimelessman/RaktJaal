@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { adminAuth } from "@/backend/lib/firebaseAdmin";
 import { bloodTypeChangedEmail } from "@/backend/lib/emailTemplates";
 import { getMailer } from "@/backend/lib/mailer";
+import { siteUrl, profileName } from "@/backend/lib/siteUrl";
 
 export const runtime = "nodejs";
 
@@ -24,7 +25,7 @@ export async function POST(request: Request) {
     if (!user.email) return NextResponse.json({ ok: true, skipped: "no-email" });
 
     const { subject, text, html } = bloodTypeChangedEmail({
-      name: user.displayName || "there",
+      name: await profileName(user.uid, user.displayName),
       oldType: oldType || "—",
       newType,
     });

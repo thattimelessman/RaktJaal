@@ -70,6 +70,8 @@ export interface BloodRequest {
 
 export interface DonorMatch extends Donor {
   distanceKm: number;
+  /** 0 = same blood group, 1 = compatible group, 2 = other group (can still help, e.g. family / blood bank). */
+  matchRank?: 0 | 1 | 2;
 }
 
 /* ------------------------------------------------------------------

@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/frontend/hooks/useAuth";
 import { signOutUser, sendEmailOtp, verifyEmailOtpCode, deleteAccountWithEmailOtp, hasPasswordProvider, setPasswordForGoogleAccount, changeAccountPassword, disableTwoFactorWithOtp } from "@/backend/lib/auth";
 import { getUserProfile, updateUserProfile } from "@/backend/lib/userProfile";
+import { subscribeSentRequests, syncMyDonorPhoto } from "@/backend/lib/requests";
+import { useLivePhoto } from "@/frontend/hooks/useLivePhoto";
 import {
   Droplet,
   Home,
@@ -129,6 +131,7 @@ function drawToConstrainedDataUrl(source, sourceWidth, sourceHeight, maxBytes = 
 async function squareCropDataUrl(dataUrl) {
   try {
     const img = await loadImage(dataUrl);
+    if (img.width === img.height && dataUrlByteLength(dataUrl) <= MAX_PHOTO_BYTES) return dataUrl;
     return drawToConstrainedDataUrl(img, img.width, img.height, MAX_PHOTO_BYTES, true) || dataUrl;
   } catch {
     return dataUrl;
@@ -483,8 +486,10 @@ function Pill({ children }) {
  *  otherwise falls back to initials. Used in the Profile row and the
  *  sidebar identity chip, so both stay in sync automatically. */
 /** Circular avatar — now with a built-in full-screen pop-out! */
-function Avatar({ photo, initials, size = 40 }) {
+function Avatar({ photo: photoProp, uid, initials, size = 40 }) {
   const [expanded, setExpanded] = useState(false);
+  // With a uid the photo is live (follows the person's current profile photo).
+  const photo = useLivePhoto(uid, photoProp);
 
   return (
     <>
@@ -513,8 +518,13 @@ function Avatar({ photo, initials, size = 40 }) {
           <img 
             src={photo} 
             alt="Expanded profile" 
-            className="max-w-full max-h-full rounded-2xl shadow-2xl transition-transform" 
-            style={{ animation: "scale-up 0.2s ease-out forwards" }}
+            className="rounded-2xl shadow-2xl transition-transform"
+            style={{
+              width: "min(88vw, 88vh, 560px)",
+              height: "min(88vw, 88vh, 560px)",
+              objectFit: "cover",
+              animation: "scale-up 0.2s ease-out forwards",
+            }}
             onClick={(e) => e.stopPropagation()} // Stops the image click from closing it
           />
           <style>{`@keyframes scale-up { from { transform: scale(0.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }`}</style>
@@ -1576,7 +1586,7 @@ function BloodTypePicker({ value, onSave, unlocked = false, user }) {
       `Current (incorrect) blood group: ${value || ""}`,
       "Correct blood group: ",
       "",
-      "I have attached my medical proof (lab report / blood group card).",
+      "Optional: I have attached my medical proof (lab report / blood group card).",
       "",
       "Thank you.",
     ].join("\n");
@@ -1703,7 +1713,7 @@ function DonationDetailModal({ entry, onClose }) {
         {/* Header */}
         <div className="flex items-start justify-between gap-3 px-5 pt-5 pb-4" style={{ borderBottom: `1px solid ${C.border}` }}>
           <div className="flex items-center gap-3 min-w-0">
-            <Avatar photo={entry.counterpartPhoto} initials={initials} size={52} />
+            <Avatar photo={entry.counterpartPhoto} uid={entry.counterpartUid} initials={initials} size={52} />
             <div className="min-w-0">
               <p className="text-base font-bold truncate" style={{ color: C.ink, fontFamily: F }}>
                 {entry.counterpartName || "Someone"}
@@ -1850,8 +1860,47 @@ function DonationLogRow({ entry }) {
   );
 }
 
-function DonationHistory({ donations }) {
-  const [tab, setTab] = useState("donated"); // "donated" | "received"
+/** One row in the "My requests" tab: any request this person made, whatever its outcome. */
+function MyRequestRow({ r }) {
+  const status = r.donationVerified
+    ? { label: "Completed", bg: "#DEF5E4", color: "#1F6B3A" }
+    : r.status === "approved"
+    ? { label: "Accepted", bg: "#DCEEFF", color: "#1D4ED8" }
+    : r.status === "pending"
+    ? { label: "Pending", bg: "#FFF3D6", color: "#8A5A00" }
+    : r.status === "declined"
+    ? { label: "Declined", bg: C.chip, color: C.brickDark }
+    : { label: "Cancelled", bg: C.chip, color: C.sub };
+  const when = new Date(r.createdAt || Date.now()).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+  return (
+    <div className="flex items-center justify-between gap-3 px-3.5 py-2.5 rounded-xl" style={{ background: C.hover }}>
+      <div className="min-w-0">
+        <div className="text-sm truncate" style={{ color: C.ink, fontFamily: F, fontWeight: 600 }}>
+          {r.bloodType} · {r.units} unit{r.units > 1 ? "s" : ""}{r.hospital ? ` · ${r.hospital}` : ""}
+        </div>
+        <div className="text-xs mt-0.5 truncate" style={{ color: C.sub, fontFamily: F }}>
+          {when}{r.donorName && r.status === "approved" ? ` · ${r.donorName} accepted` : ""}
+        </div>
+      </div>
+      <span className="px-2.5 py-1 rounded-full text-xs shrink-0" style={{ background: status.bg, color: status.color, fontFamily: F, fontWeight: 700 }}>
+        {status.label}
+      </span>
+    </div>
+  );
+}
+
+function DonationHistory({ donations, myUid }) {
+  const [tab, setTab] = useState("donated"); // "donated" | "received" | "requests"
+  const [myRequests, setMyRequests] = useState([]);
+
+  // Every request this person has made (pending, accepted, cancelled, declined). Live.
+  useEffect(() => {
+    if (!myUid) return;
+    const unsub = subscribeSentRequests(myUid, (rows) =>
+      setMyRequests([...rows].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)))
+    );
+    return () => unsub && unsub();
+  }, [myUid]);
 
   const donated = (donations || []).filter((d) => d.role === "donor").sort((a, b) => (b.verifiedAt || 0) - (a.verifiedAt || 0));
   const received = (donations || []).filter((d) => d.role === "requester").sort((a, b) => (b.verifiedAt || 0) - (a.verifiedAt || 0));
@@ -1884,9 +1933,35 @@ function DonationHistory({ donations }) {
         >
           Received ({received.length})
         </button>
+        <button
+          onClick={() => setTab("requests")}
+          className="text-xs px-3 py-1.5 rounded-full transition-colors"
+          style={{
+            background: tab === "requests" ? C.ink : C.chip,
+            color: tab === "requests" ? "#fff" : C.sub,
+            fontFamily: F,
+            fontWeight: 700,
+          }}
+        >
+          My requests ({myRequests.length})
+        </button>
       </div>
 
-      {rows.length === 0 ? (
+      {tab === "requests" ? (
+        myRequests.length === 0 ? (
+          <div className="rounded-xl p-5 text-center" style={{ background: C.hover, border: `1px dashed ${C.border}` }}>
+            <p className="text-sm" style={{ color: C.sub, fontFamily: F }}>
+              You haven't asked for blood yet. Every request you make, answered or not, will be listed here.
+            </p>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {myRequests.map((r) => (
+              <MyRequestRow key={r.id} r={r} />
+            ))}
+          </div>
+        )
+      ) : rows.length === 0 ? (
         <div className="rounded-xl p-5 text-center" style={{ background: C.hover, border: `1px dashed ${C.border}` }}>
           <p className="text-sm" style={{ color: C.sub, fontFamily: F }}>
             {tab === "donated"
@@ -2327,6 +2402,38 @@ export default function ProfilePage() {
     };
   }, [authLoading, authUser]);
 
+  // One-time clean-up: a photo saved before automatic 1:1 cropping existed is
+  // cropped to a square and saved back, so it looks the same everywhere.
+  const photoCheckedRef = useRef(false);
+  useEffect(() => {
+    if (!authUser || !user?.profilePhoto || photoCheckedRef.current) return;
+    photoCheckedRef.current = true;
+    const original = user.profilePhoto;
+    loadImage(original)
+      .then(async (img) => {
+        if (img.width === img.height) return;
+        const square = await squareCropDataUrl(original);
+        if (!square || square === original) return;
+        setUser((u) => (u ? { ...u, profilePhoto: square } : u));
+        updateUserProfile(authUser.uid, { profilePhoto: square }).catch(() => {});
+        syncMyDonorPhoto(authUser.uid, square);
+      })
+      .catch(() => {});
+  }, [authUser, user?.profilePhoto]);
+
+  // Email buttons deep-link here: /profile?tab=security and /profile#donation-history.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (new URLSearchParams(window.location.search).get("tab") === "security") setTab("security");
+  }, []);
+  useEffect(() => {
+    if (profileLoading || typeof window === "undefined" || window.location.hash !== "#donation-history") return;
+    const t = setTimeout(() => {
+      document.getElementById("donation-history")?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 350);
+    return () => clearTimeout(t);
+  }, [profileLoading]);
+
   if (authLoading || profileLoading) {
     return (
       <DialogShell onClose={() => router.back()}>
@@ -2349,7 +2456,17 @@ export default function ProfilePage() {
   };
 
   const updateField = (key, value) => {
+    // Every profile photo is stored as a centered 1:1 square, whatever path it came from.
+    if (key === "profilePhoto" && value) {
+      squareCropDataUrl(value).then((square) => commitField(key, square));
+      return;
+    }
+    commitField(key, value);
+  };
+
+  const commitField = (key, value) => {
     const previous = user?.[key];
+    if (key === "profilePhoto") syncMyDonorPhoto(authUser.uid, value || null);
     const updated = { ...user, [key]: value };
     setUser(updated);
     flashSaved();
@@ -2828,7 +2945,7 @@ export default function ProfilePage() {
               {/* Donation history row */}
               <div id="donation-history">
                 <Row label="Donation history" isLast>
-                  <DonationHistory donations={user.donations} />
+                  <DonationHistory donations={user.donations} myUid={authUser.uid} />
                 </Row>
               </div>
             </div>
@@ -2956,4 +3073,4 @@ export default function ProfilePage() {
       </section>
     </DialogShell>
   );
-}
+}

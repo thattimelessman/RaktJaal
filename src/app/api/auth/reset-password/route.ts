@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { adminAuth, adminDb } from "@/backend/lib/firebaseAdmin";
 import { passwordResetEmail } from "@/backend/lib/emailTemplates";
 import { getMailer } from "@/backend/lib/mailer";
+import { siteUrl, profileName } from "@/backend/lib/siteUrl";
 
 export const runtime = "nodejs";
 
@@ -48,15 +49,14 @@ export async function POST(request: Request) {
     }
     await secRef.set({ lastResetEmailAt: Date.now() }, { merge: true });
 
-    const actionCodeSettings = process.env.NEXT_PUBLIC_APP_URL
-      ? { url: `${process.env.NEXT_PUBLIC_APP_URL.replace(/\/$/, "")}/login` }
-      : undefined;
+    const base = siteUrl();
+    const actionCodeSettings = base ? { url: `${base}/login` } : undefined;
     const resetLink = await adminAuth.generatePasswordResetLink(user.email!, actionCodeSettings);
 
     const mailer = getMailer();
     if (mailer) {
       const { subject, text, html } = passwordResetEmail({
-        name: user.displayName || "there",
+        name: await profileName(user.uid, user.displayName),
         resetLink,
       });
       await mailer.transporter.sendMail({ from: mailer.from, to: user.email!, subject, text, html });

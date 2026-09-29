@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { adminAuth } from "@/backend/lib/firebaseAdmin";
 import { passwordChangedEmail } from "@/backend/lib/emailTemplates";
 import { getMailer } from "@/backend/lib/mailer";
+import { siteUrl, profileName } from "@/backend/lib/siteUrl";
 
 export const runtime = "nodejs";
 
@@ -19,7 +20,7 @@ export async function POST(request: Request) {
     if (!user.email) return NextResponse.json({ ok: true, skipped: "no-email" });
 
     const { subject, text, html } = passwordChangedEmail({
-      name: user.displayName || "there",
+      name: await profileName(user.uid, user.displayName),
       time: new Date().toUTCString().replace("GMT", "UTC"),
     });
     await mailer.transporter.sendMail({ from: mailer.from, to: user.email, subject, text, html });

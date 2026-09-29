@@ -3,6 +3,7 @@ import { FieldValue } from "firebase-admin/firestore";
 import { adminAuth, adminDb } from "@/backend/lib/firebaseAdmin";
 import { donationConfirmedEmail } from "@/backend/lib/emailTemplates";
 import { getMailer } from "@/backend/lib/mailer";
+import { siteUrl } from "@/backend/lib/siteUrl";
 import type { DonationLogEntry, DonationRequest } from "@/backend/types";
 
 export const runtime = "nodejs";
@@ -216,7 +217,7 @@ export async function POST(request: Request) {
     // In-app notification to both sides that verification is complete,
     // with a link straight to their donation history.
     try {
-      const appUrl = (process.env.NEXT_PUBLIC_APP_URL || "").replace(/\/$/, "");
+      const appUrl = siteUrl();
       const historyLink = appUrl ? `${appUrl}/profile#donation-history` : "/profile#donation-history";
       const now2 = Date.now();
       const batch = adminDb.batch();
@@ -252,7 +253,7 @@ export async function POST(request: Request) {
           adminAuth.getUser(req.requesterUid),
         ]);
 
-        const appUrl = (process.env.NEXT_PUBLIC_APP_URL || "").replace(/\/$/, "");
+        const appUrl = siteUrl();
         const historyLink = appUrl ? `${appUrl}/profile#donation-history` : "/profile#donation-history";
         const date = new Date().toUTCString().slice(0, 16);
 

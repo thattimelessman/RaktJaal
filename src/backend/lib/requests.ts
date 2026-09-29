@@ -214,7 +214,7 @@ export async function setDonorAvailability(uid: string, available: boolean) {
 }
 
 /**
- * Real nearby-donor search: same blood type, inside the geohash cells around
+ * Real nearby-donor search: all blood groups (same group ranked first), inside the geohash cells around
  * the point, filtered to a true radius, nearest first. The signed-in user is
  * excluded so nobody can request blood from themselves.
  */
@@ -224,16 +224,13 @@ export async function findNearbyDonors(
   lng: number,
   excludeUid: string
 ): Promise<DonorMatch[]> {
+  // Every registered donor nearby is listed, whatever their own blood group:
+  // a family member or a blood bank can help with any group. Same-group and
+  // compatible donors are ranked first (see rankOf below).
   const cells = wideGeohashSearchCells(lat, lng);
   const snaps = await Promise.all(
     cells.map((cell) =>
-      getDocs(
-        query(
-          collection(db, "donors"),
-          where("bloodType", "==", bloodType),
-          where("geohashWide", "==", cell)
-        )
-      )
+      getDocs(query(collection(db, "donors"), where("geohashWide", "==", cell)))
     )
   );
 
@@ -246,10 +243,50 @@ export async function findNearbyDonors(
       const donor = { uid: d.id, ...d.data() } as Donor;
       if (donor.available === false) continue;
       const distanceKm = haversineDistanceKm(lat, lng, donor.lat, donor.lng);
-      if (distanceKm <= SEARCH_RADIUS_KM) out.push({ ...donor, distanceKm });
+      if (distanceKm <= SEARCH_RADIUS_KM) {
+        out.push({ ...donor, distanceKm, matchRank: rankOf(donor.bloodType, bloodType) });
+      }
     }
   }
-  return out.sort((a, b) => a.distanceKm - b.distanceKm);
+  return out.sort(
+    (a, b) => (a.matchRank ?? 2) - (b.matchRank ?? 2) || a.distanceKm - b.distanceKm
+  );
+}
+
+/** Which recipient groups each donor group can give red cells to. */
+const CAN_GIVE_TO: Record<string, string[]> = {
+  "O-": ["O-", "O+", "A-", "A+", "B-", "B+", "AB-", "AB+"],
+  "O+": ["O+", "A+", "B+", "AB+"],
+  "A-": ["A-", "A+", "AB-", "AB+"],
+  "A+": ["A+", "AB+"],
+  "B-": ["B-", "B+", "AB-", "AB+"],
+  "B+": ["B+", "AB+"],
+  "AB-": ["AB-", "AB+"],
+  "AB+": ["AB+"],
+};
+
+function rankOf(donorType: string | undefined, needed: string): 0 | 1 | 2 {
+  if (donorType === needed) return 0;
+  return donorType && CAN_GIVE_TO[donorType]?.includes(needed) ? 1 : 2;
+}
+
+/** One donor's public card by uid (used to show a donor who accepted from far away). */
+export async function getDonorCard(uid: string): Promise<Donor | null> {
+  try {
+    const snap = await getDoc(doc(db, "donors", uid));
+    return snap.exists() ? ({ uid: snap.id, ...snap.data() } as Donor) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Keeps the public donor card's photo current (best-effort; no card yet = nothing to update). */
+export async function syncMyDonorPhoto(uid: string, photo: string | null): Promise<void> {
+  try {
+    await updateDoc(doc(db, "donors", uid), { profilePhoto: photo, updatedAt: Date.now() });
+  } catch {
+    /* no donor card yet, it is created with the current photo on first sync */
+  }
 }
 
 /* ----------------------------- requests --------------------------- */
@@ -378,10 +415,11 @@ export interface CreateOpenRequestInput {
  * Publishes an OPEN request: not addressed to any one donor. It is written the
  * moment the requester submits, whether or not any donor is registered nearby,
  * so it always exists in Firestore and every signed-in user can see it while it
- * is pending. Any donor with the same blood type can accept it (acceptOpenRequest).
+ * is pending. Any registered donor can accept it (acceptOpenRequest).
  * donorUid stays null until someone accepts.
  */
 export async function createOpenRequest(input: CreateOpenRequestInput): Promise<string> {
+  // Any registered donor may accept an open request, whatever their blood group.
   const now = Date.now();
   const id = `${input.requesterUid}_open_${now}`;
 

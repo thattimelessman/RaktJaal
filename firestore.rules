@@ -88,8 +88,8 @@ service cloud.firestore {
 
   // Requester creates their own pending request. Two shapes:
   //  - DIRECT: addressed to one donor, id = requesterUid_donorUid
-  //  - OPEN:   donorUid == null, id = requesterUid_open_<timestamp>; any donor
-  //            with the matching blood type can accept it later.
+  //  - OPEN:   donorUid == null, id = requesterUid_open_<timestamp>; any
+  //            registered donor can accept it later.
   allow create: if signedIn()
     && request.resource.data.requesterUid == request.auth.uid
     && request.resource.data.status == 'pending'
@@ -142,7 +142,8 @@ service cloud.firestore {
 
   // A donor accepts an OPEN request: claims it (donorUid null -> me) and
   // approves it in one write. Only while pending and unclaimed, so two donors
-  // racing can't both win. The donor's blood type must match the request.
+  // racing can't both win. Any registered donor may accept, whatever their blood
+  // group: a family member or a blood bank can help with any request.
   allow update: if signedIn()
     && request.resource.data.diff(resource.data).affectedKeys()
          .hasOnly(['status', 'threadId', 'approvedAt', 'updatedAt', 'donorUid', 'donorName', 'donorPhoto'])
@@ -151,7 +152,7 @@ service cloud.firestore {
     && resource.data.requesterUid != request.auth.uid
     && request.resource.data.donorUid == request.auth.uid
     && request.resource.data.status == 'approved'
-    && get(/databases/$(database)/documents/donors/$(request.auth.uid)).data.bloodType == resource.data.bloodType;
+    && exists(/databases/$(database)/documents/donors/$(request.auth.uid));
 
   allow delete: if false;
 

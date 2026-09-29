@@ -33,7 +33,12 @@ const esc = (s: unknown) =>
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
 
-const appUrl = () => (process.env.NEXT_PUBLIC_APP_URL || "").replace(/\/$/, "");
+const appUrl = () => {
+  const explicit = (process.env.NEXT_PUBLIC_APP_URL || "").trim().replace(/\/$/, "");
+  if (explicit) return /^https?:\/\//.test(explicit) ? explicit : `https://${explicit}`;
+  const vercel = process.env.VERCEL_PROJECT_PRODUCTION_URL || process.env.VERCEL_URL;
+  return vercel ? `https://${vercel.replace(/\/$/, "")}` : "";
+};
 
 /* ---------- shell ---------- */
 
@@ -281,13 +286,13 @@ export function passwordChangedEmail(o: { name: string; time: string }) {
     subject: "Your RaktJaal password was changed",
     text: `Hi ${o.name}, the password on your RaktJaal account was changed on ${o.time}. If this wasn't you, reset your password immediately: ${url}/login`,
     html: shell({
-      hero: "security",
+      hero: "reset",
       heading: "Password changed",
       body:
         p(`Hi ${esc(o.name)}, the password on your RaktJaal account was just changed.`) +
         p(`<span style="font-size:12px;color:${MUTED};">${esc(o.time)}. If this was you, no action is needed. If not, reset your password right away and turn on two-step verification.</span>`),
       ctaLabel: "Secure my account",
-      ctaHref: `${url}/profile`,
+      ctaHref: `${url}/profile?tab=security`,
       preheader: "Your RaktJaal password was changed.",
     }),
   };
@@ -307,7 +312,7 @@ export function newSignInEmail(o: { name: string; device: string; location: stri
         p(`Hi ${esc(o.name)}, your account was just accessed from ${b(o.device)} in ${b(o.location)}.`) +
         p(`<span style="font-size:12px;color:${MUTED};">${esc(o.time)}. If this was you, no action is needed.</span>`),
       ctaLabel: "Secure my account",
-      ctaHref: `${url}/settings/security`,
+      ctaHref: `${url}/profile?tab=security`,
       preheader: "A new device signed in to your account.",
     }),
   };
