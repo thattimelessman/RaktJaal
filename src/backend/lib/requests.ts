@@ -364,7 +364,6 @@ export function subscribeIncomingRequests(
  */
 export function subscribeCityPendingRequests(
   cityKey: string,
-  bloodType: "ALL" | BloodType,
   myUid: string,
   cb: (rows: DonationRequest[]) => void,
   onError?: (e: Error) => void
@@ -378,13 +377,7 @@ export function subscribeCityPendingRequests(
     (snap) => {
       const rows = snap.docs
         .map((d) => ({ id: d.id, ...d.data() }) as DonationRequest)
-        .filter(
-          (r) =>
-            r.donorUid !== myUid &&
-            r.requesterUid !== myUid &&
-            (bloodType === "ALL" || r.bloodType === bloodType)
-        );
-
+        .filter((r) => r.donorUid !== myUid && r.requesterUid !== myUid);
       cb(rows);
     },
     (e) => onError?.(e)
@@ -408,7 +401,7 @@ export function subscribeAllPendingRequests(
     (snap) => {
       const rows = snap.docs
         .map((d) => ({ id: d.id, ...d.data() }) as DonationRequest)
-        .filter((r) => r.requesterUid !== myUid);
+        .filter((r) => r.requesterUid !== myUid && r.donorUid !== myUid);
       cb(rows);
     },
     (e) => onError?.(e)

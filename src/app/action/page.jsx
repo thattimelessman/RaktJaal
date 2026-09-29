@@ -12,6 +12,7 @@ import {
   getContactPhone,
   subscribeMessages,
   subscribeAllPendingRequests,
+  subscribeCityPendingRequests,
   confirmDonation,
   timeAgo,
   MAX_INLINE_ATTACHMENT_BYTES,
@@ -1171,6 +1172,12 @@ function NeedBloodFlow({ me, sent, donorSync, onSent, onCancel, onReopen, onOpen
     setSendingId(donor.uid);
     setSendError("");
     try {
+      const requesterCity = (me.address?.city || "").trim();
+      if (!requesterCity) {
+        setSendError("Your profile is missing a city. Go to Profile → Address and save it first.");
+        setSendingId(null);
+        return;
+      }
       await createDonationRequest({
         requesterUid: me.uid,
         requesterName: me.name || "Someone",
@@ -1183,7 +1190,7 @@ function NeedBloodFlow({ me, sent, donorSync, onSent, onCancel, onReopen, onOpen
         hospital: hospital.trim() || location,
         lat: coords.lat,
         lng: coords.lng,
-        city: me.address?.city || "",
+        city: requesterCity,
       });
       onSent?.(donor);
     } catch (e) {
@@ -1779,6 +1786,7 @@ function DonateBloodFlow({ me, incoming, donorSync, onApprove, onDecline, onOpen
   useEffect(() => {
     if (browseMode === "mine" || !me.uid) {
       setBrowseRows([]);
+      setBrowseLoading(false);
       return;
     }
 
@@ -1795,10 +1803,15 @@ function DonateBloodFlow({ me, incoming, donorSync, onApprove, onDecline, onOpen
       setBrowseLoading(false);
     };
 
-    const unsub = subscribeAllPendingRequests(me.uid, onRows, onErr);
+    let unsub;
+    if (myCityKey) {
+      unsub = subscribeCityPendingRequests(myCityKey, me.uid, onRows, onErr);
+    } else {
+      unsub = subscribeAllPendingRequests(me.uid, onRows, onErr);
+    }
 
     return () => unsub && unsub();
-  }, [browseMode, me.uid]);
+  }, [browseMode, me.uid, myCityKey]);
 
   const browseSorted = useMemo(() => {
     let rows = browseRows;
@@ -1806,12 +1819,15 @@ function DonateBloodFlow({ me, incoming, donorSync, onApprove, onDecline, onOpen
       rows = rows.filter((r) => r.bloodType === browseBloodType);
     }
     if (browseMode === "nearby") {
-      if (!myPos) return [];
-      rows = rows
-        .map((r) => ({ r, d: haversineKm(myPos.lat, myPos.lng, r.lat, r.lng) }))
-        .filter(({ d }) => d <= browseDistanceKm)
-        .sort((a, b) => a.d - b.d)
-        .map(({ r }) => r);
+      if (myPos) {
+        rows = rows
+          .map((r) => ({ r, d: haversineKm(myPos.lat, myPos.lng, r.lat, r.lng) }))
+          .filter(({ d }) => d <= browseDistanceKm)
+          .sort((a, b) => a.d - b.d)
+          .map(({ r }) => r);
+      } else {
+        rows = [...rows].sort((a, b) => b.createdAt - a.createdAt);
+      }
       return rows;
     }
     return [...rows].sort((a, b) => {
