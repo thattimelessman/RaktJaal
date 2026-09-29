@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/frontend/hooks/useAuth";
 import { signOutUser, sendEmailOtp, verifyEmailOtpCode, deleteAccountWithEmailOtp, hasPasswordProvider, setPasswordForGoogleAccount, changeAccountPassword, disableTwoFactorWithOtp } from "@/backend/lib/auth";
 import { getUserProfile, updateUserProfile } from "@/backend/lib/userProfile";
-import { subscribeSentRequests, syncMyDonorPhoto } from "@/backend/lib/requests";
+import { subscribeSentRequests, syncMyDonorPhoto, getContactPhone, cancelRequest } from "@/backend/lib/requests";
 import { useLivePhoto } from "@/frontend/hooks/useLivePhoto";
 import {
   Droplet,
@@ -1860,47 +1860,223 @@ function DonationLogRow({ entry }) {
   );
 }
 
-/** One row in the "My requests" tab: any request this person made, whatever its outcome. */
-function MyRequestRow({ r }) {
-  const status = r.donationVerified
-    ? { label: "Completed", bg: "#DEF5E4", color: "#1F6B3A" }
-    : r.status === "approved"
-    ? { label: "Accepted", bg: "#DCEEFF", color: "#1D4ED8" }
-    : r.status === "pending"
-    ? { label: "Pending", bg: "#FFF3D6", color: "#8A5A00" }
-    : r.status === "declined"
-    ? { label: "Declined", bg: C.chip, color: C.brickDark }
-    : { label: "Cancelled", bg: C.chip, color: C.sub };
-  const when = new Date(r.createdAt || Date.now()).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+/* ---------------------------------------------------------------
+   My requests: every request this person has made (pending, accepted,
+   completed, declined, cancelled). Lives in its own profile section,
+   separate from Donation history. Each row opens a detail window.
+------------------------------------------------------------------ */
+function requestStatus(r) {
+  if (r.donationVerified) return { label: "Completed", bg: "#DEF5E4", color: "#1F6B3A" };
+  if (r.status === "approved") return { label: "Accepted", bg: "#DCEEFF", color: "#1D4ED8" };
+  if (r.status === "pending") return { label: "Pending", bg: "#FFF3D6", color: "#8A5A00" };
+  if (r.status === "declined") return { label: "Declined", bg: C.chip, color: C.brickDark };
+  return { label: "Cancelled", bg: C.chip, color: C.sub };
+}
+
+function MyRequestDetailModal({ r, onClose }) {
+  const status = requestStatus(r);
+  const [phone, setPhone] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const hasDonor = Boolean(r.donorUid) && r.status === "approved";
+
+  useEffect(() => {
+    if (!hasDonor) return;
+    let cancelled = false;
+    getContactPhone(r.id, r.donorUid).then((p) => { if (!cancelled) setPhone(p); });
+    return () => { cancelled = true; };
+  }, [hasDonor, r.id, r.donorUid]);
+
+  const fmt = (ts) =>
+    new Date(ts).toLocaleString(undefined, { month: "long", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
+
+  // Only steps that actually happened are listed.
+  const steps = [{ label: "Request sent", ts: r.createdAt, color: C.faint }];
+  if (r.approvedAt) steps.push({ label: `${r.donorName || "A donor"} accepted`, ts: r.approvedAt, color: C.faint });
+  if (r.status === "declined") steps.push({ label: "Declined by the donor", ts: r.updatedAt, color: C.brick });
+  if (r.status === "cancelled") steps.push({ label: "You cancelled this request", ts: r.updatedAt, color: C.brick });
+  if (r.requesterConfirmedAt) steps.push({ label: "You confirmed the donation", ts: r.requesterConfirmedAt, color: C.faint });
+  if (r.donorConfirmedAt) steps.push({ label: "Donor confirmed the donation", ts: r.donorConfirmedAt, color: C.faint });
+  if (r.donationVerified) steps.push({ label: "Donation verified", ts: r.donationVerifiedAt || r.updatedAt, color: "#1F6B3A" });
+
+  const initials = (r.donorName || "?").trim().split(/\s+/).slice(0, 2).map((p) => p[0]?.toUpperCase()).join("");
+
+  const doCancel = async () => {
+    setBusy(true);
+    setErr("");
+    try {
+      await cancelRequest(r);
+      onClose();
+    } catch (e) {
+      setErr(e?.message || "Couldn't cancel this request.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
-    <div className="flex items-center justify-between gap-3 px-3.5 py-2.5 rounded-xl" style={{ background: C.hover }}>
-      <div className="min-w-0">
-        <div className="text-sm truncate" style={{ color: C.ink, fontFamily: F, fontWeight: 600 }}>
-          {r.bloodType} · {r.units} unit{r.units > 1 ? "s" : ""}{r.hospital ? ` · ${r.hospital}` : ""}
+    <div
+      className="fixed inset-0 z-[9999] flex items-center justify-center p-4 sm:p-8"
+      style={{ background: "rgba(0,0,0,0.5)", backdropFilter: "blur(3px)" }}
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-lg max-h-[85vh] overflow-y-auto rk-scroll rounded-2xl shadow-2xl"
+        style={{ background: C.paper, animation: "modalIn 0.16s ease-out forwards" }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-3 px-5 pt-5 pb-4" style={{ borderBottom: `1px solid ${C.border}` }}>
+          <div className="flex items-center gap-3 min-w-0">
+            {hasDonor ? (
+              <Avatar photo={r.donorPhoto} uid={r.donorUid} initials={initials} size={52} />
+            ) : (
+              <div className="w-[52px] h-[52px] rounded-full flex items-center justify-center shrink-0" style={{ background: C.blush }}>
+                <Droplet size={20} color={C.brickDark} />
+              </div>
+            )}
+            <div className="min-w-0">
+              <p className="text-base font-bold truncate" style={{ color: C.ink, fontFamily: F }}>
+                {hasDonor ? r.donorName || "Donor" : "Open request"}
+              </p>
+              <p className="text-xs mt-0.5" style={{ color: C.sub, fontFamily: F }}>
+                {hasDonor ? "Accepted your request" : r.status === "pending" ? "Waiting for a donor to accept" : "No donor accepted this request"}
+              </p>
+            </div>
+          </div>
+          <button onClick={onClose} aria-label="Close" className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 hover:bg-[#F4F4F5]">
+            <X size={16} color={C.sub} />
+          </button>
         </div>
-        <div className="text-xs mt-0.5 truncate" style={{ color: C.sub, fontFamily: F }}>
-          {when}{r.donorName && r.status === "approved" ? ` · ${r.donorName} accepted` : ""}
+
+        <div className="px-5 py-4 flex flex-col gap-4">
+          <div className="flex flex-wrap gap-2">
+            <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold" style={{ background: C.blush, color: C.brickDark, fontFamily: F }}>
+              <Droplet size={12} /> {r.bloodType}
+            </span>
+            <span className="px-3 py-1.5 rounded-full text-xs font-bold" style={{ background: C.chip, color: C.ink, fontFamily: F }}>
+              {r.units} unit{r.units > 1 ? "s" : ""}
+            </span>
+            {r.urgent && (
+              <span className="px-3 py-1.5 rounded-full text-xs font-bold" style={{ background: C.blush, color: C.brickDark, fontFamily: F }}>Urgent</span>
+            )}
+            <span className="px-3 py-1.5 rounded-full text-xs font-bold" style={{ background: status.bg, color: status.color, fontFamily: F }}>
+              {status.label}
+            </span>
+          </div>
+
+          <div className="flex flex-col gap-2.5">
+            <p className="text-[11px] uppercase tracking-wide font-bold" style={{ color: C.faint, fontFamily: F }}>Details</p>
+            <div className="flex items-center gap-2.5">
+              <MapPin size={14} color={C.sub} className="shrink-0" />
+              <span className="text-sm" style={{ color: C.ink, fontFamily: F }}>
+                {r.hospital || "Location not recorded"}{r.city ? `, ${r.city}` : ""}
+              </span>
+            </div>
+            {hasDonor && (
+              <div className="flex items-center gap-2.5">
+                <Phone size={14} color={C.sub} className="shrink-0" />
+                <span className="text-sm" style={{ color: phone ? C.ink : C.faint, fontFamily: F }}>
+                  {phone || "Phone number not available"}
+                </span>
+              </div>
+            )}
+          </div>
+
+          <div className="flex flex-col">
+            <p className="text-[11px] uppercase tracking-wide font-bold mb-2.5" style={{ color: C.faint, fontFamily: F }}>Timeline</p>
+            {steps.map((s, i) => (
+              <div key={s.label} className="flex gap-2.5">
+                <div className="flex flex-col items-center pt-1">
+                  <div className="w-2 h-2 rounded-full shrink-0" style={{ background: s.color }} />
+                  {i < steps.length - 1 && <div className="w-px flex-1 mt-1" style={{ background: C.border }} />}
+                </div>
+                <div className="pb-3 min-w-0">
+                  <p className="text-xs font-semibold" style={{ color: C.ink, fontFamily: F }}>{s.label}</p>
+                  <p className="text-xs mt-0.5" style={{ color: C.sub, fontFamily: F }}>{fmt(s.ts)}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {err && <p className="text-xs" style={{ color: C.brickDark, fontFamily: F }}>{err}</p>}
+          {r.status === "pending" && (
+            <button
+              onClick={doCancel}
+              disabled={busy}
+              className="self-start text-xs px-3.5 py-2 rounded-full transition-colors hover:bg-[#F4F4F5] disabled:opacity-50"
+              style={{ border: `1px solid ${C.border}`, color: C.brickDark, fontFamily: F, fontWeight: 700 }}
+            >
+              {busy ? "Cancelling…" : "Cancel request"}
+            </button>
+          )}
         </div>
       </div>
-      <span className="px-2.5 py-1 rounded-full text-xs shrink-0" style={{ background: status.bg, color: status.color, fontFamily: F, fontWeight: 700 }}>
-        {status.label}
-      </span>
     </div>
   );
 }
 
-function DonationHistory({ donations, myUid }) {
-  const [tab, setTab] = useState("donated"); // "donated" | "received" | "requests"
-  const [myRequests, setMyRequests] = useState([]);
+function MyRequests({ myUid }) {
+  const [rows, setRows] = useState([]);
+  const [openId, setOpenId] = useState(null);
 
-  // Every request this person has made (pending, accepted, cancelled, declined). Live.
   useEffect(() => {
     if (!myUid) return;
-    const unsub = subscribeSentRequests(myUid, (rows) =>
-      setMyRequests([...rows].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)))
+    const unsub = subscribeSentRequests(myUid, (list) =>
+      setRows([...list].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)))
     );
     return () => unsub && unsub();
   }, [myUid]);
+
+  const active = rows.find((r) => r.id === openId) || null;
+
+  if (rows.length === 0) {
+    return (
+      <div className="rounded-xl p-5 text-center" style={{ background: C.hover, border: `1px dashed ${C.border}` }}>
+        <p className="text-sm" style={{ color: C.sub, fontFamily: F }}>
+          You haven't asked for blood yet. Every request you make, answered or not, will be listed here.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div className="flex flex-col gap-2">
+        {rows.map((r) => {
+          const st = requestStatus(r);
+          const when = new Date(r.createdAt || Date.now()).toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" });
+          return (
+            <button
+              key={r.id}
+              onClick={() => setOpenId(r.id)}
+              className="w-full flex items-center justify-between gap-3 px-3.5 py-2.5 text-left rounded-xl transition-colors hover:opacity-90"
+              style={{ background: C.hover }}
+            >
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="w-7 h-7 rounded-full flex items-center justify-center shrink-0" style={{ background: C.blush }}>
+                  <Droplet size={13} color={C.brickDark} />
+                </div>
+                <div className="min-w-0">
+                  <div className="text-sm truncate" style={{ color: C.ink, fontFamily: F, fontWeight: 600 }}>
+                    {r.bloodType} · {r.units} unit{r.units > 1 ? "s" : ""}{r.hospital ? ` · ${r.hospital}` : ""}
+                  </div>
+                  <div className="text-xs mt-0.5 truncate" style={{ color: C.sub, fontFamily: F }}>{when}</div>
+                </div>
+              </div>
+              <span className="px-2.5 py-1 rounded-full text-xs shrink-0" style={{ background: st.bg, color: st.color, fontFamily: F, fontWeight: 700 }}>
+                {st.label}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      {active && <MyRequestDetailModal r={active} onClose={() => setOpenId(null)} />}
+    </>
+  );
+}
+
+function DonationHistory({ donations }) {
+  const [tab, setTab] = useState("donated"); // "donated" | "received"
 
   const donated = (donations || []).filter((d) => d.role === "donor").sort((a, b) => (b.verifiedAt || 0) - (a.verifiedAt || 0));
   const received = (donations || []).filter((d) => d.role === "requester").sort((a, b) => (b.verifiedAt || 0) - (a.verifiedAt || 0));
@@ -1933,35 +2109,9 @@ function DonationHistory({ donations, myUid }) {
         >
           Received ({received.length})
         </button>
-        <button
-          onClick={() => setTab("requests")}
-          className="text-xs px-3 py-1.5 rounded-full transition-colors"
-          style={{
-            background: tab === "requests" ? C.ink : C.chip,
-            color: tab === "requests" ? "#fff" : C.sub,
-            fontFamily: F,
-            fontWeight: 700,
-          }}
-        >
-          My requests ({myRequests.length})
-        </button>
       </div>
 
-      {tab === "requests" ? (
-        myRequests.length === 0 ? (
-          <div className="rounded-xl p-5 text-center" style={{ background: C.hover, border: `1px dashed ${C.border}` }}>
-            <p className="text-sm" style={{ color: C.sub, fontFamily: F }}>
-              You haven't asked for blood yet. Every request you make, answered or not, will be listed here.
-            </p>
-          </div>
-        ) : (
-          <div className="flex flex-col gap-2">
-            {myRequests.map((r) => (
-              <MyRequestRow key={r.id} r={r} />
-            ))}
-          </div>
-        )
-      ) : rows.length === 0 ? (
+      {rows.length === 0 ? (
         <div className="rounded-xl p-5 text-center" style={{ background: C.hover, border: `1px dashed ${C.border}` }}>
           <p className="text-sm" style={{ color: C.sub, fontFamily: F }}>
             {tab === "donated"
@@ -2944,8 +3094,15 @@ export default function ProfilePage() {
 
               {/* Donation history row */}
               <div id="donation-history">
-                <Row label="Donation history" isLast>
-                  <DonationHistory donations={user.donations} myUid={authUser.uid} />
+                <Row label="Donation history">
+                  <DonationHistory donations={user.donations} />
+                </Row>
+              </div>
+
+              {/* Every request this person has made, in its own section */}
+              <div id="my-requests">
+                <Row label="My requests" isLast>
+                  <MyRequests myUid={authUser.uid} />
                 </Row>
               </div>
             </div>

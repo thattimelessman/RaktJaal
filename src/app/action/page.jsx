@@ -1115,24 +1115,63 @@ function InboxPanel({ me, threads, activeThreadId, onSelectThread, onSend, onMar
   const [draft, setDraft] = useState("");
   const [sendError, setSendError] = useState("");
   const [messages, setMessages] = useState([]);
-  const active = threads.find((t) => t.id === activeThreadId);
-  const activeId = active?.id;
+  // ONE conversation per person. Every approved request creates its own thread
+  // (id = request id), so two people who did several donations together had
+  // several inbox entries. Threads are grouped by the OTHER participant's uid
+  // (participants are enforced by the security rules, so this can't be spoofed),
+  // shown as a single conversation, and their messages are merged by time.
+  // New messages go to the newest thread of the pair.
+  const groups = useMemo(() => {
+    const lastAt = (t) => t.lastMessageAt ?? t.createdAt ?? 0;
+    const map = new Map();
+    for (const t of threads) {
+      const other = t.participants.find((p) => p !== me.uid) || t.id;
+      if (!map.has(other)) map.set(other, []);
+      map.get(other).push(t);
+    }
+    return [...map.entries()]
+      .map(([key, list]) => {
+        const sorted = [...list].sort((a, b) => lastAt(b) - lastAt(a));
+        return {
+          key,
+          threads: sorted,
+          primary: sorted[0],
+          unread: sorted.reduce((n, t) => n + (t.unread?.[me.uid] || 0), 0),
+        };
+      })
+      .sort((a, b) => lastAt(b.primary) - lastAt(a.primary));
+  }, [threads, me.uid]);
 
-  // Live messages for the open conversation.
+  const activeGroup = groups.find((g) => g.threads.some((t) => t.id === activeThreadId)) || null;
+  const active = activeGroup?.primary;
+  const groupIdsKey = activeGroup ? activeGroup.threads.map((t) => t.id).sort().join(",") : "";
+
+  // Live, merged messages for the open conversation (all threads with this person).
   useEffect(() => {
-    if (!activeId) { setMessages([]); return; }
+    if (!groupIdsKey) { setMessages([]); return; }
     setMessages([]);
-    const unsub = subscribeMessages(activeId, setMessages, (e) => setSendError(e.message));
-    onMarkRead?.(activeId);
-    return unsub;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeId]);
+    const per = {};
+    const unsubs = groupIdsKey.split(",").map((id) =>
+      subscribeMessages(
+        id,
+        (rows) => {
+          per[id] = rows;
+          setMessages(Object.values(per).flat().sort((a, b) => a.createdAt - b.createdAt));
+        },
+        (e) => setSendError(e.message)
+      )
+    );
+    return () => unsubs.forEach((u) => u());
+  }, [groupIdsKey]);
 
-  // New message arrived while this thread is open -> keep it marked read.
+  // Opened, or a new message arrived while open -> keep every thread in the group read.
   useEffect(() => {
-    if (activeId && (active?.unread?.[me.uid] || 0) > 0) onMarkRead?.(activeId);
+    if (!activeGroup) return;
+    activeGroup.threads.forEach((t) => {
+      if ((t.unread?.[me.uid] || 0) > 0) onMarkRead?.(t.id);
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active?.unread?.[me.uid]]);
+  }, [activeGroup?.key, activeGroup?.unread]);
 
   const otherName = (t) => {
     const otherUid = t.participants.find((p) => p !== me.uid);
@@ -1209,15 +1248,16 @@ function InboxPanel({ me, threads, activeThreadId, onSelectThread, onSend, onMar
               No conversations yet. Once a request is approved, you can chat here.
             </p>
           ) : (
-            threads.map((t) => {
+            groups.map((g) => {
+              const t = g.primary;
               const name = otherName(t);
-              const unread = (t.unread?.[me.uid] || 0) > 0;
+              const unread = g.unread > 0;
               return (
                 <button
-                  key={t.id}
+                  key={g.key}
                   onClick={() => onSelectThread(t.id)}
                   className="w-full flex items-center gap-3 px-5 py-3.5 text-left transition-colors hover:bg-[#F9F9F9]"
-                  style={{ background: activeThreadId === t.id ? C.chip : "transparent", borderBottom: `1px solid ${C.border}` }}
+                  style={{ background: activeGroup?.key === g.key ? C.chip : "transparent", borderBottom: `1px solid ${C.border}` }}
                 >
                   <Avatar photo={otherPhoto(t)} uid={otherUidOf(t)} initials={initialsOf(name)} size={38} />
                   <div className="min-w-0 flex-1">
@@ -2891,7 +2931,15 @@ function ActionPageInner() {
               aria-label="Your profile"
               className="rounded-full transition-shadow duration-150 rk-avatar-btn"
             >
-              <Avatar photo={user.profilePhoto} initials={initials} size={32} tone={C.chip} expandable={false} />
+              {/* Soft tri-colour ring: hot pink, pale blue, pale yellow in equal thirds */}
+              <span
+                className="flex rounded-full"
+                style={{ padding: 2, background: "conic-gradient(from 0deg, #FF4FA3 0deg 120deg, #BFE2FF 120deg 240deg, #FFF0A3 240deg 360deg)" }}
+              >
+                <span className="flex rounded-full bg-white" style={{ padding: 2 }}>
+                  <Avatar photo={user.profilePhoto} uid={user.uid} initials={initials} size={32} tone={C.chip} expandable={false} />
+                </span>
+              </span>
             </button>
           </div>
         </div>
