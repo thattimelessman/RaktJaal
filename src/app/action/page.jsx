@@ -14,6 +14,7 @@ import {
   subscribeMessages,
   subscribeAllPendingRequests,
   confirmDonation,
+  getRequestById,
   timeAgo,
   MAX_INLINE_ATTACHMENT_BYTES,
 } from "@/backend/lib/requests";
@@ -40,6 +41,8 @@ import {
   Building2,
   SlidersHorizontal,
   BadgeCheck,
+  ChevronDown,
+  RotateCcw,
 } from "lucide-react";
 
 /* -----------------------------------------------------------------
@@ -606,8 +609,131 @@ function FileBubble({ file, isMine }) {
 /* ---------------------------------------------------------------
    Notification bell + dropdown
 ------------------------------------------------------------------ */
-function NotificationBell({ notifications, ready, onMarkAllRead }) {
+/* One notification row. Tapping the row jumps to the relevant screen; the
+   buttons act right here (approve / decline / accept / open chat / confirm). */
+function NotificationItem({ n, ctx }) {
+  const [busy, setBusy] = useState("");
+  const [msg, setMsg] = useState("");
+  const req = n.requestId ? ctx.findRequest(n.requestId) : null;
+
+  const run = async (label, fn) => {
+    setBusy(label);
+    setMsg("");
+    ctx.setWorking(true);
+    try {
+      await fn();
+      ctx.markRead(n);
+    } catch (e) {
+      const m = e?.message || "Something went wrong.";
+      setMsg(/permission|insufficient/i.test(m) ? "This request is no longer available, or doesn't match your blood group." : m);
+    } finally {
+      setBusy("");
+      ctx.setWorking(false);
+    }
+  };
+
+  const btnBase = "text-[11.5px] px-3 py-1.5 rounded-full transition-opacity hover:opacity-85 disabled:opacity-50";
+  const primary = { background: C.ink, color: "#fff", fontFamily: F, fontWeight: 700 };
+  const danger = { background: C.chip, color: C.brickDark, fontFamily: F, fontWeight: 700 };
+  const ghost = { background: C.chip, color: C.ink, fontFamily: F, fontWeight: 700 };
+  const Btn = ({ label, busyLabel, style, onClick }) => (
+    <button
+      disabled={Boolean(busy)}
+      onClick={(e) => { e.stopPropagation(); onClick(); }}
+      className={btnBase}
+      style={style}
+    >
+      {busy === label ? busyLabel : label}
+    </button>
+  );
+
+  let actions = null;
+  let note = "";
+  if (n.kind === "incoming-request") {
+    if (!req) actions = <Btn label="View" style={ghost} onClick={() => ctx.go(n)} />;
+    else if (req.status === "pending") {
+      actions = (
+        <>
+          <Btn label="Approve" busyLabel="Approving…" style={primary} onClick={() => run("Approve", () => ctx.approve(req))} />
+          <Btn label="Decline" busyLabel="Declining…" style={danger} onClick={() => run("Decline", () => ctx.decline(req))} />
+        </>
+      );
+    } else if (req.status === "approved") {
+      actions = <Btn label="Open chat" style={primary} onClick={() => ctx.openThread(req.threadId || req.id)} />;
+    } else note = `You ${req.status} this request.`;
+  } else if (n.kind === "open-request") {
+    actions = (
+      <>
+        <Btn
+          label="I can donate"
+          busyLabel="Accepting…"
+          style={primary}
+          onClick={() =>
+            run("I can donate", async () => {
+              const r = await getRequestById(n.requestId);
+              if (!r || r.status !== "pending" || r.donorUid) throw new Error("Someone else already accepted this request.");
+              await ctx.acceptOpen(r);
+              ctx.openThread(r.id);
+            })
+          }
+        />
+        <Btn label="View" style={ghost} onClick={() => ctx.go(n)} />
+      </>
+    );
+  } else if (n.kind === "thread") {
+    actions = <Btn label="Open chat" style={primary} onClick={() => ctx.openThread(n.threadId || n.requestId)} />;
+  } else if (n.kind === "sent-update") {
+    actions = <Btn label="View request" style={primary} onClick={() => ctx.go(n)} />;
+  } else if (n.kind === "confirm-donation") {
+    const mine = req ? (req.donorUid === ctx.meUid ? req.donorConfirmedAt : req.requesterConfirmedAt) : null;
+    if (req && req.status === "approved" && !mine) {
+      actions = (
+        <>
+          <Btn label="Confirm donation" busyLabel="Confirming…" style={primary} onClick={() => run("Confirm donation", () => ctx.confirm(req))} />
+          <Btn label="View" style={ghost} onClick={() => ctx.go(n)} />
+        </>
+      );
+    } else if (mine) note = "You've confirmed this donation.";
+    else actions = <Btn label="View" style={ghost} onClick={() => ctx.go(n)} />;
+  } else if (n.kind === "history") {
+    actions = <Btn label="View history" style={primary} onClick={() => ctx.go(n)} />;
+  } else if (n.kind === "profile") {
+    actions = <Btn label="Open profile" style={primary} onClick={() => ctx.go(n)} />;
+  }
+
+  const clickable = Boolean(n.kind);
+  return (
+    <div
+      role={clickable ? "button" : undefined}
+      tabIndex={clickable ? 0 : undefined}
+      onClick={() => clickable && ctx.go(n)}
+      onKeyDown={(e) => clickable && e.key === "Enter" && ctx.go(n)}
+      className="flex items-start gap-3 px-4 py-3.5 transition-colors hover:bg-[#FAFAFA]"
+      style={{ borderBottom: `1px solid ${C.border}`, background: n.read ? "transparent" : "#FEF6F6", cursor: clickable ? "pointer" : "default" }}
+    >
+      <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0" style={{ background: n.tone === "success" ? C.mint : C.blush }}>
+        {n.tone === "success" ? <Check size={13} color="#1F6B3A" /> : <Bell size={13} color={C.brickDark} />}
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="text-[13px]" style={{ color: C.ink, fontFamily: F, fontWeight: 700 }}>{n.title}</p>
+        <p className="text-[12px] mt-0.5 leading-relaxed" style={{ color: C.sub, fontFamily: F }}>{n.body}</p>
+        {(actions || note) && (
+          <div className="flex items-center gap-1.5 mt-2.5 flex-wrap">
+            {actions}
+            {note && <span className="text-[11.5px]" style={{ color: C.sub, fontFamily: F, fontWeight: 600 }}>{note}</span>}
+          </div>
+        )}
+        {msg && <p className="text-[11.5px] mt-2" style={{ color: C.brickDark, fontFamily: F }}>{msg}</p>}
+        <p className="text-[10.5px] mt-1.5" style={{ color: C.faint, fontFamily: F, fontWeight: 600 }}>{timeAgo(n.createdAt)}</p>
+      </div>
+      {!n.read && <span className="w-1.5 h-1.5 rounded-full mt-2 shrink-0" style={{ background: C.brick }} />}
+    </div>
+  );
+}
+
+function NotificationBell({ notifications, ready, onMarkAllRead, actions }) {
   const [open, setOpen] = useState(false);
+  const [working, setWorking] = useState(false);
   const [hover, setHover] = useState(false);
   const [ringing, setRinging] = useState(false);
   const [toast, setToast] = useState(null);
@@ -663,11 +789,27 @@ function NotificationBell({ notifications, ready, onMarkAllRead }) {
 
   // Auto-close after 3 seconds of inactivity
   useEffect(() => {
-    if (open && !hover) {
-      const t = setTimeout(() => setOpen(false), 3000);
+    if (open && !hover && !working) {
+      const t = setTimeout(() => setOpen(false), 8000);
       return () => clearTimeout(t);
     }
-  }, [open, hover]);
+  }, [open, hover, working]);
+
+  // Everything a notification row needs to act in place.
+  const ctx = {
+    ...actions,
+    setWorking,
+    markRead: (n) => { if (!n.read) actions.markOneRead?.(n.id)?.catch?.(() => {}); },
+    go: (n) => {
+      if (!n.read) actions.markOneRead?.(n.id)?.catch?.(() => {});
+      setOpen(false);
+      actions.go(n);
+    },
+    openThread: (id) => {
+      setOpen(false);
+      actions.openThread(id);
+    },
+  };
 
   return (
     <div 
@@ -697,7 +839,9 @@ function NotificationBell({ notifications, ready, onMarkAllRead }) {
 
       {toast && !open && (
         <div
-          className="absolute right-0 top-12 z-30 w-[300px] p-3.5 rounded-2xl bg-white flex items-start gap-2.5 pointer-events-none"
+          role="button"
+          onClick={() => { setToast(null); setOpen(true); }}
+          className="absolute right-0 top-12 z-30 w-[300px] p-3.5 rounded-2xl bg-white flex items-start gap-2.5 cursor-pointer"
           style={{ border: `1px solid ${C.border}`, boxShadow: "0 24px 60px -18px rgba(0,0,0,0.25)", animation: "toastInOut 2.5s ease forwards" }}
         >
           <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0" style={{ background: toast.tone === "success" ? C.mint : C.blush }}>
@@ -742,21 +886,7 @@ function NotificationBell({ notifications, ready, onMarkAllRead }) {
           ) : (
             <div className="flex flex-col">
               {notifications.map((n) => (
-                <div
-                  key={n.id}
-                  className="flex items-start gap-3 px-4 py-3.5 transition-colors hover:bg-[#FAFAFA]"
-                  style={{ borderBottom: `1px solid ${C.border}`, background: n.read ? "transparent" : "#FEF6F6" }}
-                >
-                  <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0" style={{ background: n.tone === "success" ? C.mint : C.blush }}>
-                    {n.tone === "success" ? <Check size={13} color="#1F6B3A" /> : <Bell size={13} color={C.brickDark} />}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-[13px]" style={{ color: C.ink, fontFamily: F, fontWeight: 700 }}>{n.title}</p>
-                    <p className="text-[12px] mt-0.5 leading-relaxed" style={{ color: C.sub, fontFamily: F }}>{n.body}</p>
-                    <p className="text-[10.5px] mt-1.5" style={{ color: C.faint, fontFamily: F, fontWeight: 600 }}>{timeAgo(n.createdAt)}</p>
-                  </div>
-                  {!n.read && <span className="w-1.5 h-1.5 rounded-full mt-2 shrink-0" style={{ background: C.brick }} />}
-                </div>
+                <NotificationItem key={n.id} n={n} ctx={ctx} />
               ))}
             </div>
           )}
@@ -780,7 +910,189 @@ function ThreadCallButton({ thread, meUid }) {
    Inbox — thread list + a simple chat view. All state-local; no
    messages are actually delivered anywhere.
 ------------------------------------------------------------------ */
+/* ---------------------------------------------------------------
+   Small UI helpers: drag-to-resize panes and a nicer filter dropdown.
+------------------------------------------------------------------ */
+function useResizableWidth(storageKey, initial, min, max) {
+  const [w, setW] = useState(initial);
+  useEffect(() => {
+    try {
+      const v = Number(localStorage.getItem(storageKey));
+      if (v >= min && v <= max) setW(v);
+    } catch { /* storage unavailable */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const startDrag = (e) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = w;
+    let latest = startW;
+    document.body.style.userSelect = "none";
+    document.body.style.cursor = "col-resize";
+    const move = (ev) => {
+      latest = Math.min(max, Math.max(min, startW + ev.clientX - startX));
+      setW(latest);
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      document.body.style.userSelect = "";
+      document.body.style.cursor = "";
+      try { localStorage.setItem(storageKey, String(latest)); } catch { /* ignore */ }
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+  const reset = () => {
+    setW(initial);
+    try { localStorage.removeItem(storageKey); } catch { /* ignore */ }
+  };
+  return [w, startDrag, reset];
+}
+
+/* A thin draggable divider between two panes. Double-click resets the width. */
+function ResizeHandle({ onPointerDown, onDoubleClick }) {
+  return (
+    <div
+      role="separator"
+      aria-orientation="vertical"
+      title="Drag to resize · double-click to reset"
+      onPointerDown={onPointerDown}
+      onDoubleClick={onDoubleClick}
+      className="hidden sm:block relative shrink-0 z-10 group"
+      style={{ width: 8, margin: "0 -4px", cursor: "col-resize", touchAction: "none" }}
+    >
+      <div
+        className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-[3px] rounded-full opacity-0 group-hover:opacity-100 group-active:opacity-100 transition-opacity"
+        style={{ background: C.brick }}
+      />
+    </div>
+  );
+}
+
+/* Pill button that opens a floating panel (blood group grid, distance list…). */
+function FilterDropdown({ icon: Icon, label, valueLabel, active, width = 264, children }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    const onKey = (e) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen((o) => !o)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        className="flex items-center gap-1.5 text-xs pl-3 pr-2.5 py-2 rounded-full transition-all active:scale-[0.97]"
+        style={{
+          border: `1px solid ${active ? C.ink : C.border}`,
+          background: active ? C.ink : "#fff",
+          color: active ? "#fff" : C.ink,
+          fontFamily: F,
+          fontWeight: 700,
+          boxShadow: open ? "0 4px 14px -6px rgba(0,0,0,0.3)" : "none",
+        }}
+      >
+        <Icon size={12} />
+        <span style={{ opacity: 0.6, fontWeight: 600 }}>{label}</span>
+        <span>{valueLabel}</span>
+        <ChevronDown size={13} style={{ transform: open ? "rotate(180deg)" : "none", transition: "transform 0.15s" }} />
+      </button>
+      {open && (
+        <div
+          className="absolute left-0 top-full mt-2 z-40 rounded-2xl bg-white p-3"
+          style={{ width, maxWidth: "88vw", border: `1px solid ${C.border}`, boxShadow: "0 24px 60px -18px rgba(0,0,0,0.28)", animation: "scaleUp 0.14s ease-out forwards", transformOrigin: "top left" }}
+        >
+          {children(() => setOpen(false))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const DISTANCE_HINTS = { 10: "Walking / very close", 25: "Around your city", 50: "Nearby towns", 100: "Wide search" };
+
+function BloodGroupFilter({ value, onChange }) {
+  return (
+    <FilterDropdown icon={Droplet} label="Blood" valueLabel={value === "ALL" ? "All groups" : value} active={value !== "ALL"}>
+      {(close) => (
+        <div>
+          <p className="text-[10.5px] uppercase tracking-wide font-bold mb-2 px-1" style={{ color: C.faint, fontFamily: F }}>Blood group</p>
+          <button
+            onClick={() => { onChange("ALL"); close(); }}
+            className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-[13px] mb-2 transition-colors hover:bg-[#F4F4F5]"
+            style={{ background: value === "ALL" ? C.chip : "transparent", color: C.ink, fontFamily: F, fontWeight: 700 }}
+          >
+            All blood groups
+            {value === "ALL" && <Check size={14} color={C.brick} />}
+          </button>
+          <div className="grid grid-cols-4 gap-1.5">
+            {BLOOD_TYPES.map((bt) => {
+              const on = value === bt;
+              return (
+                <button
+                  key={bt}
+                  onClick={() => { onChange(bt); close(); }}
+                  className="py-2 rounded-xl text-[13px] transition-all active:scale-95"
+                  style={{
+                    background: on ? C.brick : C.chip,
+                    color: on ? "#fff" : C.ink,
+                    fontFamily: F,
+                    fontWeight: 800,
+                    boxShadow: on ? "0 4px 10px -3px rgba(214,48,63,0.55)" : "none",
+                  }}
+                >
+                  {bt}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </FilterDropdown>
+  );
+}
+
+function DistanceFilter({ value, onChange }) {
+  return (
+    <FilterDropdown icon={MapPin} label="Range" valueLabel={`${value} km`} active={value !== 25} width={248}>
+      {(close) => (
+        <div>
+          <p className="text-[10.5px] uppercase tracking-wide font-bold mb-1.5 px-1" style={{ color: C.faint, fontFamily: F }}>Search radius</p>
+          {DISTANCE_OPTIONS.map((d) => {
+            const on = value === d;
+            return (
+              <button
+                key={d}
+                onClick={() => { onChange(d); close(); }}
+                className="w-full flex items-center justify-between gap-3 px-3 py-2.5 rounded-xl text-left transition-colors hover:bg-[#F4F4F5]"
+                style={{ background: on ? C.chip : "transparent" }}
+              >
+                <span>
+                  <span className="block text-[13px]" style={{ color: C.ink, fontFamily: F, fontWeight: 700 }}>Within {d} km</span>
+                  <span className="block text-[11px] mt-0.5" style={{ color: C.sub, fontFamily: F }}>{DISTANCE_HINTS[d]}</span>
+                </span>
+                {on && <Check size={14} color={C.brick} />}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </FilterDropdown>
+  );
+}
+
 function InboxPanel({ me, threads, activeThreadId, onSelectThread, onSend, onMarkRead, onBack }) {
+  const [listW, startListDrag, resetListW] = useResizableWidth("rk-inbox-list-w", 288, 220, 520);
   const [draft, setDraft] = useState("");
   const [sendError, setSendError] = useState("");
   const [messages, setMessages] = useState([]);
@@ -867,7 +1179,7 @@ function InboxPanel({ me, threads, activeThreadId, onSelectThread, onSend, onMar
   return (
     <div className="flex-1 flex min-h-0">
       {/* thread list */}
-      <div className={`w-full sm:w-72 shrink-0 flex-col ${active ? "hidden sm:flex" : "flex"}`} style={{ borderRight: `1px solid ${C.border}` }}>
+      <div className={`w-full sm:w-[var(--lw)] shrink-0 flex-col ${active ? "hidden sm:flex" : "flex"}`} style={{ borderRight: `1px solid ${C.border}`, "--lw": `${listW}px` }}>
         <div className="px-5 py-4" style={{ borderBottom: `1px solid ${C.border}` }}>
           <h2 className="text-[17px] font-bold tracking-tight" style={{ color: C.ink, fontFamily: F }}>Inbox</h2>
         </div>
@@ -903,6 +1215,8 @@ function InboxPanel({ me, threads, activeThreadId, onSelectThread, onSend, onMar
           )}
         </div>
       </div>
+
+      <ResizeHandle onPointerDown={startListDrag} onDoubleClick={resetListW} />
 
       {/* active thread */}
       <div className={`flex-1 flex-col min-w-0 ${active ? "flex" : "hidden sm:flex"}`}>
@@ -2040,28 +2354,16 @@ function DonateBloodFlow({ me, incoming, donorSync, onApprove, onDecline, onAcce
             <span className="flex items-center gap-1 text-[11px]" style={{ color: C.faint, fontFamily: F }}>
               <SlidersHorizontal size={11} /> Filters:
             </span>
-            <select
-              value={browseBloodType}
-              onChange={(e) => setBrowseBloodType(e.target.value)}
-              className="text-xs px-2.5 py-1.5 rounded-full outline-none"
-              style={{ border: `1px solid ${C.border}`, color: C.ink, fontFamily: F, fontWeight: 600, background: "#fff" }}
-            >
-              <option value="ALL">All blood groups</option>
-              {BLOOD_TYPES.map((bt) => (
-                <option key={bt} value={bt}>{bt}</option>
-              ))}
-            </select>
-            {browseMode === "nearby" && (
-              <select
-                value={browseDistanceKm}
-                onChange={(e) => setBrowseDistanceKm(Number(e.target.value))}
-                className="text-xs px-2.5 py-1.5 rounded-full outline-none"
-                style={{ border: `1px solid ${C.border}`, color: C.ink, fontFamily: F, fontWeight: 600, background: "#fff" }}
+            <BloodGroupFilter value={browseBloodType} onChange={setBrowseBloodType} />
+            {browseMode === "nearby" && <DistanceFilter value={browseDistanceKm} onChange={setBrowseDistanceKm} />}
+            {(browseBloodType !== "ALL" || (browseMode === "nearby" && browseDistanceKm !== 25)) && (
+              <button
+                onClick={() => { setBrowseBloodType("ALL"); setBrowseDistanceKm(25); }}
+                className="flex items-center gap-1 text-[11.5px] px-2.5 py-1.5 rounded-full transition-colors hover:bg-[#F4F4F5]"
+                style={{ color: C.sub, fontFamily: F, fontWeight: 700 }}
               >
-                {DISTANCE_OPTIONS.map((d) => (
-                  <option key={d} value={d}>within {d} km</option>
-                ))}
-              </select>
+                <RotateCcw size={11} /> Reset
+              </button>
             )}
           </div>
         )}
@@ -2367,6 +2669,7 @@ function ActionPageInner() {
 
   // Everything live: donor publishing, sent/incoming requests, threads, notifications.
   const backend = useRequestsBackend(user, profileComplete);
+  const [sidebarW, startSidebarDrag, resetSidebarW] = useResizableWidth("rk-sidebar-w", 256, 200, 380);
 
   if (authLoading || profileLoading) return null; // brief flash while Firebase resolves the session
   if (!user) return <SignedOut />;
@@ -2377,6 +2680,33 @@ function ActionPageInner() {
     if (!threadId) return;
     setActiveThreadId(threadId);
     setView("inbox");
+  };
+
+  // Default destination when a notification row is tapped.
+  const handleNotificationGo = (n) => {
+    switch (n.kind) {
+      case "thread":
+        handleOpenThread(n.threadId || n.requestId);
+        break;
+      case "incoming-request":
+      case "open-request":
+        goTo("donate");
+        break;
+      case "sent-update":
+        goTo("need");
+        break;
+      case "confirm-donation":
+        goTo(backend.incoming.some((r) => r.id === n.requestId) ? "donate" : "need");
+        break;
+      case "history":
+        router.push("/profile#donation-history");
+        break;
+      case "profile":
+        router.push("/profile");
+        break;
+      default:
+        break;
+    }
   };
 
   const initials = user.name?.trim()
@@ -2412,8 +2742,8 @@ function ActionPageInner() {
 
       {/* ---- Left sidebar (desktop) ---- */}
       <aside
-        className="hidden sm:flex sm:w-64 shrink-0 h-full flex-col"
-        style={{ borderRight: `1px solid ${C.border}`, background: C.sidebar }}
+        className="hidden sm:flex sm:w-[var(--sw)] shrink-0 h-full flex-col"
+        style={{ borderRight: `1px solid ${C.border}`, background: C.sidebar, "--sw": `${sidebarW}px` }}
       >
         <div className="px-6 pt-6 pb-1 flex flex-col items-start">
           <button onClick={() => router.push("/")} className="flex items-center gap-2.5 text-left">
@@ -2460,6 +2790,7 @@ function ActionPageInner() {
           })}
         </nav>
       </aside>
+      <ResizeHandle onPointerDown={startSidebarDrag} onDoubleClick={resetSidebarW} />
 
       {/* ---- Main column ---- */}
       <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden">
@@ -2486,7 +2817,22 @@ function ActionPageInner() {
           <div className="hidden sm:block" />
 
           <div className="flex items-center gap-3">
-            <NotificationBell notifications={backend.notifications} ready={backend.notificationsReady} onMarkAllRead={backend.markAllRead} />
+            <NotificationBell
+              notifications={backend.notifications}
+              ready={backend.notificationsReady}
+              onMarkAllRead={backend.markAllRead}
+              actions={{
+                meUid: user.uid,
+                markOneRead: backend.markOneRead,
+                findRequest: (id) => backend.incoming.find((r) => r.id === id) || backend.sent.find((r) => r.id === id) || null,
+                approve: backend.approve,
+                decline: backend.decline,
+                acceptOpen: backend.acceptOpen,
+                confirm: (req) => confirmDonation(req, user.uid),
+                openThread: handleOpenThread,
+                go: handleNotificationGo,
+              }}
+            />
             <button
               onClick={() => router.push("/profile")}
               aria-label="Your profile"

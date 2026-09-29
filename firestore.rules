@@ -16,7 +16,31 @@ service cloud.firestore {
        (Server routes use the Admin SDK and bypass these rules.)
     ---------------------------------------------------------------- */
     match /users/{uid} {
-      allow read, create, update, delete: if isSelf(uid);
+      allow read, create: if isSelf(uid);
+
+      // Safety-critical fields are guarded server-side, not just in the UI:
+      //  - bloodType can only change while bloodTypeUnlocked == true (set by an
+      //    admin via /api/admin/unlock-blood-type after a support request)
+      //  - a client can never set bloodTypeUnlocked to true itself
+      //  - twoFactorEnabled can be turned ON by the owner, but only the server
+      //    (/api/account/disable-2fa, after an email OTP) can turn it OFF
+      allow update: if isSelf(uid)
+        && (
+          resource.data.get('bloodType', '') == ''
+          || request.resource.data.get('bloodType', '') == resource.data.get('bloodType', '')
+          || resource.data.get('bloodTypeUnlocked', false) == true
+        )
+        && (
+          request.resource.data.get('bloodTypeUnlocked', false) == false
+          || request.resource.data.get('bloodTypeUnlocked', false) == resource.data.get('bloodTypeUnlocked', false)
+        )
+        && (
+          resource.data.get('twoFactorEnabled', false) == false
+          || request.resource.data.get('twoFactorEnabled', false) == true
+        );
+
+      // Accounts are deleted through /api/account/delete (Admin SDK).
+      allow delete: if false;
     }
 
     /* ---------------------------------------------------------------
@@ -224,7 +248,10 @@ service cloud.firestore {
       allow read: if signedIn() && resource.data.uid == request.auth.uid;
 
       allow create: if signedIn()
-        && request.resource.data.keys().hasOnly(['uid', 'title', 'body', 'tone', 'read', 'createdAt'])
+        && request.resource.data.keys().hasOnly(['uid', 'title', 'body', 'tone', 'read', 'createdAt', 'kind', 'requestId', 'threadId'])
+        && (!('kind' in request.resource.data) || request.resource.data.kind in [
+             'incoming-request', 'open-request', 'thread', 'sent-update', 'confirm-donation', 'history', 'profile'
+           ])
         && request.resource.data.read == false
         && request.resource.data.tone in ['info', 'success']
         && request.resource.data.title is string && request.resource.data.title.size() <= 120

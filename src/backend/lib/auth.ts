@@ -121,7 +121,7 @@ export async function signInWithEmail(
   }
 }
 
-export async function sendEmailOtp(purpose: "registration" | "delete" | "twofactor"): Promise<void> {
+export async function sendEmailOtp(purpose: "registration" | "delete" | "twofactor" | "disable2fa"): Promise<void> {
   if (!auth.currentUser) throw new Error("No signed-in account found.");
   const token = await auth.currentUser.getIdToken(true);
   const response = await fetch("/api/email-otp/send", {
@@ -143,6 +143,19 @@ export async function verifyEmailOtpCode(code: string, purpose: "registration" |
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error || "Could not verify the email OTP.");
+}
+
+/** Turns two-step verification off; the server checks the emailed OTP first. */
+export async function disableTwoFactorWithOtp(code: string): Promise<void> {
+  if (!auth.currentUser) throw new Error("No signed-in account found.");
+  const token = await auth.currentUser.getIdToken(true);
+  const response = await fetch("/api/account/disable-2fa", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ code }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || "Could not turn off two-step verification.");
 }
 
 export async function deleteAccountWithEmailOtp(code: string): Promise<void> {
@@ -230,7 +243,13 @@ export async function changeAccountPassword(currentPassword: string, newPassword
   try {
     const credential = EmailAuthProvider.credential(user.email, currentPassword);
     await reauthenticateWithCredential(user, credential);
+    // Grab a token while the session is known-good; used for the notice below.
+    const token = await user.getIdToken().catch(() => null);
     await updatePassword(user, newPassword);
+    // Security notice by email (best-effort, never fails the change).
+    if (token) {
+      fetch("/api/email/password-changed", { method: "POST", headers: { Authorization: `Bearer ${token}` } }).catch(() => {});
+    }
   } catch (err) {
     throw new Error(friendlyAuthError(err));
   }

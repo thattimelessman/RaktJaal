@@ -13,7 +13,7 @@ export async function POST(request: Request) {
     if (!authHeader.startsWith("Bearer ")) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     const decoded = await adminAuth.verifyIdToken(authHeader.slice(7));
     const { purpose } = await request.json();
-    if (purpose !== "registration" && purpose !== "delete" && purpose !== "twofactor") {
+    if (purpose !== "registration" && purpose !== "delete" && purpose !== "twofactor" && purpose !== "disable2fa") {
       return NextResponse.json({ error: "Invalid OTP purpose" }, { status: 400 });
     }
 

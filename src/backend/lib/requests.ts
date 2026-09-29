@@ -314,6 +314,8 @@ export async function createDonationRequest(input: CreateRequestInput): Promise<
     tone: "info",
     read: false,
     createdAt: now,
+    kind: "incoming-request",
+    requestId: id,
   } satisfies Omit<AppNotification, "id">);
   await batch.commit();
 
@@ -428,6 +430,8 @@ export async function createOpenRequest(input: CreateOpenRequestInput): Promise<
       tone: "info",
       read: false,
       createdAt: now,
+      kind: "open-request",
+      requestId: id,
     } satisfies Omit<AppNotification, "id">);
   }
   await batch.commit();
@@ -475,6 +479,9 @@ export async function acceptOpenRequest(
     tone: "success",
     read: false,
     createdAt: now,
+    kind: "thread",
+    requestId: req.id,
+    threadId,
   } satisfies Omit<AppNotification, "id">);
 
   try {
@@ -611,6 +618,9 @@ export async function approveRequest(req: DonationRequest): Promise<void> {
     tone: "success",
     read: false,
     createdAt: now,
+    kind: "thread",
+    requestId: req.id,
+    threadId,
   } satisfies Omit<AppNotification, "id">);
   await batch.commit();
 
@@ -636,6 +646,8 @@ export async function declineRequest(req: DonationRequest): Promise<void> {
     tone: "info",
     read: false,
     createdAt: now,
+    kind: "sent-update",
+    requestId: req.id,
   } satisfies Omit<AppNotification, "id">);
   await batch.commit();
 }
@@ -657,6 +669,8 @@ export async function reopenRequest(req: DonationRequest): Promise<void> {
       tone: "info",
       read: false,
       createdAt: now,
+      kind: "incoming-request",
+      requestId: req.id,
     } satisfies Omit<AppNotification, "id">);
   }
   await batch.commit();
@@ -859,6 +873,38 @@ export async function markAllNotificationsRead(uid: string, rows: AppNotificatio
   const batch = writeBatch(db);
   for (const n of unread) batch.update(doc(db, "notifications", n.id), { read: true });
   await batch.commit();
+}
+
+export async function markNotificationRead(id: string) {
+  await updateDoc(doc(db, "notifications", id), { read: true });
+}
+
+/** One request by id (pending requests are readable by any signed-in user). */
+export async function getRequestById(id: string): Promise<DonationRequest | null> {
+  const snap = await getDoc(doc(db, "requests", id));
+  return snap.exists() ? ({ id: snap.id, ...snap.data() } as DonationRequest) : null;
+}
+
+/**
+ * Keeps this user's avatar in their chat threads current. Threads store a
+ * snapshot of each participant's photo, so after a profile-photo change the
+ * old one would show in the inbox forever. Best-effort and idempotent: only
+ * writes threads whose stored photo differs from the current one.
+ */
+export async function syncMyThreadPhotos(
+  threads: ChatThread[],
+  uid: string,
+  photo: string | null | undefined
+): Promise<void> {
+  const target = safePhoto(photo);
+  const stale = threads.filter((t) => t.participants.includes(uid) && (t.photos?.[uid] ?? null) !== target);
+  await Promise.all(
+    stale.map((t) =>
+      updateDoc(doc(db, "threads", t.id), { [`photos.${uid}`]: target }).catch((e) =>
+        console.warn("Could not refresh thread photo:", e)
+      )
+    )
+  );
 }
 
 /** Small helper so UI can show "5 min ago" instead of a raw timestamp. */

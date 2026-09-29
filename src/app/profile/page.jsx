@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/frontend/hooks/useAuth";
-import { signOutUser, sendEmailOtp, verifyEmailOtpCode, deleteAccountWithEmailOtp, hasPasswordProvider, setPasswordForGoogleAccount, changeAccountPassword } from "@/backend/lib/auth";
+import { signOutUser, sendEmailOtp, verifyEmailOtpCode, deleteAccountWithEmailOtp, hasPasswordProvider, setPasswordForGoogleAccount, changeAccountPassword, disableTwoFactorWithOtp } from "@/backend/lib/auth";
 import { getUserProfile, updateUserProfile } from "@/backend/lib/userProfile";
 import {
   Droplet,
@@ -99,16 +99,22 @@ function dataUrlByteLength(dataUrl) {
  *  size down until the result fits under maxBytes. Returns null only if
  *  even the smallest attempt can't get under the cap (essentially never
  *  happens for a normal photo). */
-function drawToConstrainedDataUrl(source, sourceWidth, sourceHeight, maxBytes = MAX_PHOTO_BYTES) {
-  let maxDim = 800;
+function drawToConstrainedDataUrl(source, sourceWidth, sourceHeight, maxBytes = MAX_PHOTO_BYTES, square = false) {
+  let maxDim = square ? 640 : 800;
+  // Instagram-style 1:1: take the largest centered square out of the image.
+  const side = Math.min(sourceWidth, sourceHeight);
+  const sx = square ? Math.round((sourceWidth - side) / 2) : 0;
+  const sy = square ? Math.round((sourceHeight - side) / 2) : 0;
+  const cropW = square ? side : sourceWidth;
+  const cropH = square ? side : sourceHeight;
   for (let attempt = 0; attempt < 6; attempt++) {
-    const scale = Math.min(1, maxDim / Math.max(sourceWidth, sourceHeight));
-    const w = Math.max(1, Math.round(sourceWidth * scale));
-    const h = Math.max(1, Math.round(sourceHeight * scale));
+    const scale = Math.min(1, maxDim / Math.max(cropW, cropH));
+    const w = Math.max(1, Math.round(cropW * scale));
+    const h = Math.max(1, Math.round(cropH * scale));
     const canvas = document.createElement("canvas");
     canvas.width = w;
     canvas.height = h;
-    canvas.getContext("2d").drawImage(source, 0, 0, w, h);
+    canvas.getContext("2d").drawImage(source, sx, sy, cropW, cropH, 0, 0, w, h);
 
     for (const quality of [0.82, 0.65, 0.5]) {
       const dataUrl = canvas.toDataURL("image/jpeg", quality);
@@ -117,6 +123,16 @@ function drawToConstrainedDataUrl(source, sourceWidth, sourceHeight, maxBytes = 
     maxDim = Math.round(maxDim * 0.7);
   }
   return null;
+}
+
+/** Center-crops an existing data URL to 1:1 (used for camera captures set as profile photo). */
+async function squareCropDataUrl(dataUrl) {
+  try {
+    const img = await loadImage(dataUrl);
+    return drawToConstrainedDataUrl(img, img.width, img.height, MAX_PHOTO_BYTES, true) || dataUrl;
+  } catch {
+    return dataUrl;
+  }
 }
 
 function loadImage(src) {
@@ -144,7 +160,7 @@ async function processPhotoFile(file) {
       r.readAsDataURL(file);
     });
     const img = await loadImage(rawDataUrl);
-    const constrained = drawToConstrainedDataUrl(img, img.width, img.height);
+    const constrained = drawToConstrainedDataUrl(img, img.width, img.height, MAX_PHOTO_BYTES, true);
     if (!constrained) return { ok: false, reason: "Couldn't compress this image below 400KB — try a smaller photo." };
     return { ok: true, dataUrl: constrained };
   } catch {
@@ -1452,6 +1468,90 @@ function TwoFactorSetup({ onVerified, onCancel }) {
 }
 
 
+/* Turning two-step OFF needs a fresh emailed OTP, so a stolen open session
+   can't silently strip the protection. The server checks the code and
+   clears the flag; Firestore rules stop the client from doing it directly. */
+function TwoFactorDisable({ onDisabled, onCancel }) {
+  const [code, setCode] = useState("");
+  const [status, setStatus] = useState("Sending a 6-digit OTP to your account email…");
+  const [sending, setSending] = useState(true);
+  const [verifying, setVerifying] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    sendEmailOtp("disable2fa")
+      .then(() => { if (alive) setStatus("We emailed you a 6-digit OTP. Enter it to turn off two-step verification."); })
+      .catch((err) => { if (alive) setStatus(err?.message || "Could not send the OTP."); })
+      .finally(() => { if (alive) setSending(false); });
+    return () => { alive = false; };
+  }, []);
+
+  const resend = async () => {
+    setSending(true);
+    try {
+      await sendEmailOtp("disable2fa");
+      setStatus("A new OTP was sent to your email.");
+    } catch (err) {
+      setStatus(err?.message || "Could not resend the OTP.");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const confirm = async () => {
+    if (!/^\d{6}$/.test(code)) {
+      setStatus("Enter the 6-digit OTP from your email.");
+      return;
+    }
+    setVerifying(true);
+    try {
+      await disableTwoFactorWithOtp(code);
+      onDisabled();
+    } catch (err) {
+      setStatus(err?.message || "Could not verify the OTP.");
+    } finally {
+      setVerifying(false);
+    }
+  };
+
+  const btn = { border: `1px solid ${C.border}`, color: C.ink, fontFamily: F, fontWeight: 600 };
+  return (
+    <div className="flex flex-col gap-3">
+      <div>
+        <p className="text-sm" style={{ color: C.ink, fontFamily: F, fontWeight: 600 }}>Confirm it's you to turn off two-step verification</p>
+        <p className="text-[12px] mt-1 max-w-sm" style={{ color: C.sub, fontFamily: F }}>
+          Your account will be less protected without it. We need a fresh code from your email first.
+        </p>
+      </div>
+      <p className="text-xs" style={{ color: C.sub, fontFamily: F }}>{status}</p>
+      <input
+        value={code}
+        onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+        onKeyDown={(e) => e.key === "Enter" && confirm()}
+        inputMode="numeric"
+        autoComplete="one-time-code"
+        maxLength={6}
+        placeholder="Enter 6-digit OTP"
+        disabled={sending || verifying}
+        className="w-full max-w-xs text-center text-lg tracking-[0.3em] px-4 py-2 rounded-lg outline-none"
+        style={{ background: C.chip, color: C.ink, fontFamily: "monospace" }}
+      />
+      <div className="flex items-center gap-2 flex-wrap">
+        <button onClick={onCancel} disabled={verifying} className="text-xs px-3.5 py-2 rounded-full transition-colors hover:bg-[#F4F4F5]" style={btn}>Keep it on</button>
+        <button onClick={resend} disabled={sending || verifying} className="text-xs px-3.5 py-2 rounded-full transition-colors hover:bg-[#F4F4F5]" style={btn}>Resend OTP</button>
+        <button
+          onClick={confirm}
+          disabled={code.length !== 6 || verifying}
+          className="text-xs px-3.5 py-2 rounded-full text-white transition-opacity"
+          style={{ background: C.brick, fontFamily: F, fontWeight: 600, opacity: code.length === 6 && !verifying ? 1 : 0.4 }}
+        >
+          {verifying ? "Verifying…" : "Verify & turn off"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /* ---------------------------------------------------------------
    Donation history
 ------------------------------------------------------------------ */
@@ -1460,10 +1560,35 @@ function TwoFactorSetup({ onVerified, onCancel }) {
  * There is no in-app change flow — if a user makes a mistake, they 
  * must email support with medical proof to get it changed.
  */
-function BloodTypePicker({ value, onSave }) {
-  const [draft, setDraft] = useState(value || "");
+function BloodTypePicker({ value, onSave, unlocked = false, user }) {
+  const [draft, setDraft] = useState(unlocked ? "" : value || "");
 
-  if (value) {
+  // Opens a pre-filled Gmail compose window to the support inbox.
+  const openChangeRequestDraft = () => {
+    const body = [
+      "Hello RaktJaal team,",
+      "",
+      "I entered my blood group incorrectly and would like it unlocked so I can select the correct one.",
+      "",
+      `Name: ${user?.name || ""}`,
+      `Account email: ${user?.email || ""}`,
+      `Account ID: ${user?.uid || ""}`,
+      `Current (incorrect) blood group: ${value || ""}`,
+      "Correct blood group: ",
+      "",
+      "I have attached my medical proof (lab report / blood group card).",
+      "",
+      "Thank you.",
+    ].join("\n");
+    const url =
+      "https://mail.google.com/mail/?view=cm&fs=1" +
+      `&to=${encodeURIComponent("raktjaal@gmail.com")}` +
+      `&su=${encodeURIComponent("Blood Group Change Request")}` +
+      `&body=${encodeURIComponent(body)}`;
+    window.open(url, "_blank", "noopener,noreferrer");
+  };
+
+  if (value && !unlocked) {
     return (
       <div>
         <div className="flex items-center gap-2 mb-2.5">
@@ -1477,16 +1602,17 @@ function BloodTypePicker({ value, onSave }) {
           >
             <Lock size={11} /> {value}
           </span>
-          <a
-            href="mailto:support@raktjaal.com?subject=Blood%20Group%20Change%20Request"
+          <button
+            type="button"
+            onClick={openChangeRequestDraft}
             className="text-xs transition-opacity hover:opacity-60 underline"
             style={{ color: C.sub, fontFamily: F, fontWeight: 600 }}
           >
             Contact us to change
-          </a>
+          </button>
         </div>
         <p className="text-[11px] mt-2 max-w-sm" style={{ color: C.faint, fontFamily: F }}>
-          Locked permanently after saving since it's safety-critical for matching. If you entered this incorrectly, please mail us with medical proof to get it updated.
+          Locked permanently after saving since it's safety-critical for matching. If you entered this incorrectly, please mail us with medical proof to get it updated. The button opens a ready-made draft to raktjaal@gmail.com; once our team approves it, you'll be able to pick the correct group here.
         </p>
       </div>
     );
@@ -1577,16 +1703,7 @@ function DonationDetailModal({ entry, onClose }) {
         {/* Header */}
         <div className="flex items-start justify-between gap-3 px-5 pt-5 pb-4" style={{ borderBottom: `1px solid ${C.border}` }}>
           <div className="flex items-center gap-3 min-w-0">
-            <div
-              className="rounded-full overflow-hidden flex items-center justify-center shrink-0"
-              style={{ width: 52, height: 52, background: C.chip }}
-            >
-              {entry.counterpartPhoto ? (
-                <img src={entry.counterpartPhoto} alt={entry.counterpartName || "Profile"} className="w-full h-full object-cover" />
-              ) : (
-                <span className="font-semibold" style={{ color: C.ink, fontFamily: F, fontSize: 18 }}>{initials}</span>
-              )}
-            </div>
+            <Avatar photo={entry.counterpartPhoto} initials={initials} size={52} />
             <div className="min-w-0">
               <p className="text-base font-bold truncate" style={{ color: C.ink, fontFamily: F }}>
                 {entry.counterpartName || "Someone"}
@@ -1786,19 +1903,6 @@ function DonationHistory({ donations }) {
       )}
     </div>
   );
-}
-
-function nextEligibleText(donations) {
-  const donated = (donations || []).filter((d) => d.role === "donor");
-  if (donated.length === 0) return "You're eligible to donate right now.";
-  const last = donated.reduce((latest, d) => ((d.verifiedAt || 0) > (latest.verifiedAt || 0) ? d : latest), donated[0]);
-  if (!last?.verifiedAt) return "You're eligible to donate right now.";
-  const lastDate = new Date(last.verifiedAt);
-  if (isNaN(lastDate.getTime())) return "You're eligible to donate right now.";
-  const nextDate = new Date(lastDate);
-  nextDate.setDate(nextDate.getDate() + 90);
-  if (nextDate <= new Date()) return "You're eligible to donate right now.";
-  return `Eligible again from ${nextDate.toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" })}.`;
 }
 
 /**
@@ -2195,6 +2299,7 @@ export default function ProfilePage() {
   const [editingKey, setEditingKey] = useState(null); // "name" | "email" | "phone" | "address" | "addEmail"
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [settingUpTwoFactor, setSettingUpTwoFactor] = useState(false);
+  const [disablingTwoFactor, setDisablingTwoFactor] = useState(false);
   // hasPasswordProvider(authUser) only reflects reality once Firebase's
   // onAuthStateChanged fires again, which linkWithCredential does NOT
   // trigger — so this local flag covers the gap right after setting one.
@@ -2269,6 +2374,26 @@ export default function ProfilePage() {
     }
   };
 
+
+  // Sets the blood type and re-locks it in one write (an admin unlock only allows one change).
+  const saveBloodType = (bt) => {
+    const previous = user?.bloodType;
+    setUser({ ...user, bloodType: bt, bloodTypeUnlocked: false });
+    flashSaved();
+    updateUserProfile(authUser.uid, { bloodType: bt, bloodTypeUnlocked: false }).catch(() => {});
+    if (bt && bt !== previous) {
+      authUser
+        .getIdToken()
+        .then((token) =>
+          fetch("/api/email/blood-type-changed", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ oldType: previous || null, newType: bt }),
+          })
+        )
+        .catch(() => {});
+    }
+  };
 
   const saveAddress = (addr) => {
     updateField("address", addr);
@@ -2673,7 +2798,7 @@ export default function ProfilePage() {
               {/* Donor details row */}
               <Row label="Donor details">
                 <div className="flex flex-col gap-4">
-                  <BloodTypePicker value={user.bloodType} onSave={(bt) => updateField("bloodType", bt)} />
+                  <BloodTypePicker value={user.bloodType} unlocked={Boolean(user.bloodTypeUnlocked)} user={user} onSave={saveBloodType} />
 
                   <RowItem
                     left={
@@ -2703,9 +2828,6 @@ export default function ProfilePage() {
               {/* Donation history row */}
               <div id="donation-history">
                 <Row label="Donation history" isLast>
-                  <p className="text-xs mb-2.5" style={{ color: C.sub, fontFamily: F }}>
-                    {nextEligibleText(user.donations)}
-                  </p>
                   <DonationHistory donations={user.donations} />
                 </Row>
               </div>
@@ -2735,7 +2857,17 @@ export default function ProfilePage() {
 
               {/* Two-step verification */}
               <Row label="Two-step verification">
-                {user.twoFactorEnabled ? (
+                {user.twoFactorEnabled && disablingTwoFactor ? (
+                  <TwoFactorDisable
+                    onDisabled={() => {
+                      // Server already cleared the flag after checking the OTP; just mirror it locally.
+                      setUser({ ...user, twoFactorEnabled: false });
+                      setDisablingTwoFactor(false);
+                      flashSaved();
+                    }}
+                    onCancel={() => setDisablingTwoFactor(false)}
+                  />
+                ) : user.twoFactorEnabled ? (
                   <RowItem
                     left={
                       <div className="flex items-center gap-2">
@@ -2745,7 +2877,7 @@ export default function ProfilePage() {
                         </span>
                       </div>
                     }
-                    right={<KebabMenu items={[{ label: "Turn off", danger: true, onClick: () => updateField("twoFactorEnabled", false) }]} />}
+                    right={<KebabMenu items={[{ label: "Turn off", danger: true, onClick: () => setDisablingTwoFactor(true) }]} />}
                   />
                 ) : settingUpTwoFactor ? (
                   <TwoFactorSetup
@@ -2794,7 +2926,7 @@ export default function ProfilePage() {
                   hasPhoto={Boolean(user.identityPhoto)}
                   onSave={(dataUrl) => updateField("identityPhoto", dataUrl)}
                   onRemove={() => updateField("identityPhoto", null)}
-                  onAlsoSetProfilePhoto={(dataUrl) => updateField("profilePhoto", dataUrl)}
+                  onAlsoSetProfilePhoto={async (dataUrl) => updateField("profilePhoto", await squareCropDataUrl(dataUrl))}
                 />
               </Row>
 

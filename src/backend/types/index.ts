@@ -158,6 +158,10 @@ export interface AppNotification {
   tone: "info" | "success";
   read: boolean;
   createdAt: number;
+  /** What tapping the notification does (optional: older ones just aren't actionable). */
+  kind?: "incoming-request" | "open-request" | "thread" | "sent-update" | "confirm-donation" | "history" | "profile";
+  requestId?: string;
+  threadId?: string;
 }
 
 /** Contact details released only to the counter-party of an approved request. */

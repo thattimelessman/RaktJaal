@@ -8,6 +8,8 @@ import {
   cancelRequest,
   reopenRequest,
   markAllNotificationsRead,
+  markNotificationRead,
+  syncMyThreadPhotos,
   markThreadRead,
   sendMessage,
   subscribeIncomingRequests,
@@ -138,6 +140,13 @@ export function useRequestsBackend(profile: ProfileLike | null, profileComplete:
     return () => unsubs.forEach((u) => u());
   }, [uid]);
 
+  // Profile photo changed -> refresh my avatar inside every existing chat thread.
+  const myPhoto = profile?.profilePhoto ?? null;
+  useEffect(() => {
+    if (!uid || threads.length === 0) return;
+    syncMyThreadPhotos(threads, uid, myPhoto).catch(() => {});
+  }, [uid, myPhoto, threads]);
+
   const threadById = useMemo(() => new Map(threads.map((t) => [t.id, t])), [threads]);
 
   const approve = useCallback((req: DonationRequest) => approveRequest(req), []);
@@ -191,5 +200,6 @@ export function useRequestsBackend(profile: ProfileLike | null, profileComplete:
     send,
     markRead,
     markAllRead,
+    markOneRead: markNotificationRead,
   };
 }

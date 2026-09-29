@@ -14,7 +14,7 @@ function generateOtp() {
   return crypto.randomInt(100000, 1000000).toString();
 }
 
-export type EmailOtpPurpose = "registration" | "delete" | "twofactor";
+export type EmailOtpPurpose = "registration" | "delete" | "twofactor" | "disable2fa";
 
 export async function createEmailOtp(uid: string, email: string, purpose: EmailOtpPurpose) {
   const ref = adminDb.collection("emailOtps").doc(`${purpose}_${uid}`);

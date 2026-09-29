@@ -116,7 +116,7 @@ export function welcomeEmail(o: { name: string }) {
       hero: "welcome",
       heading: `Welcome to RaktJaal,<br/>${esc(o.name)}`,
       body:
-        p(`Your account is ready. RaktJaal connects people who need blood with donors nearby — and every donor on it matters.`) +
+        p(`Your account is ready. RaktJaal connects people who need blood with donors nearby and every donor on it matters.`) +
         p(`Set your blood group and city, then turn on availability so requests near you can find you.`),
       ctaLabel: "Complete your profile",
       ctaHref: `${url}/profile`,
@@ -149,11 +149,12 @@ export function accountDeletedEmail(o: { name: string }) {
 
 /* ================= 3. 2FA OTP ================= */
 
-export type OtpPurpose = "registration" | "delete" | "twofactor";
+export type OtpPurpose = "registration" | "delete" | "twofactor" | "disable2fa";
 
 const OTP_COPY: Record<OtpPurpose, { subject: string; heading: string; lead: string }> = {
   registration: { subject: "is your RaktJaal verification code", heading: "Verify your email", lead: "Enter this code to verify your email address." },
   twofactor: { subject: "is your RaktJaal two-step code", heading: "Two-step verification", lead: "Enter this code to finish signing in." },
+  disable2fa: { subject: "is your code to turn off two-step verification", heading: "Turn off two-step?", lead: "Enter this code to confirm you want to turn off two-step verification. If this wasn't you, don't share it — change your password instead." },
   delete: { subject: "is your RaktJaal deletion code", heading: "Confirm account deletion", lead: "Enter this code to permanently delete your account." },
 };
 
@@ -196,7 +197,7 @@ export function donationConfirmedEmail(o: {
       body:
         p(`Hi ${esc(o.toName)}, both sides have confirmed this donation with ${b(o.counterpartName)}. Thank you.`) +
         p(`<span style="color:${MUTED};font-size:13px;">${esc(o.bloodType)} · ${esc(o.hospital)} · ${esc(o.date || new Date().toUTCString().slice(0, 16))}</span>`) +
-        p(`Every donation like this can save up to three lives.`),
+        p(`Every donation like this can save Priceless lives.`),
       ctaLabel: "View donation history",
       ctaHref: o.historyLink,
       preheader: `Your ${o.bloodType} donation was confirmed.`,
@@ -268,6 +269,26 @@ export function bloodTypeChangedEmail(o: { name: string; oldType: string; newTyp
       ctaLabel: "View profile",
       ctaHref: `${url}/profile`,
       preheader: `Blood group updated to ${o.newType}.`,
+    }),
+  };
+}
+
+/* ================= Password changed ================= */
+
+export function passwordChangedEmail(o: { name: string; time: string }) {
+  const url = appUrl() || "#";
+  return {
+    subject: "Your RaktJaal password was changed",
+    text: `Hi ${o.name}, the password on your RaktJaal account was changed on ${o.time}. If this wasn't you, reset your password immediately: ${url}/login`,
+    html: shell({
+      hero: "security",
+      heading: "Password changed",
+      body:
+        p(`Hi ${esc(o.name)}, the password on your RaktJaal account was just changed.`) +
+        p(`<span style="font-size:12px;color:${MUTED};">${esc(o.time)}. If this was you, no action is needed. If not, reset your password right away and turn on two-step verification.</span>`),
+      ctaLabel: "Secure my account",
+      ctaHref: `${url}/profile`,
+      preheader: "Your RaktJaal password was changed.",
     }),
   };
 }

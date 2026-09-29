@@ -83,10 +83,34 @@ scaffolded so Phases 2–5 (below) are additions, not rewrites.
 - A real `users/{uid}` Firestore profile (name, DOB, address, blood type,
   phone, secondary emails, profile photo) — separate from the `donors`
   collection, which exists purely for geo-matching and needs phone + lat/lng.
-- Profile photo upload with client-side compression: every photo is
-  re-encoded as JPEG and squeezed under 400KB before it's stored.
+- Profile photo upload with client-side processing: every photo is
+  center-cropped to a square (1:1, like Instagram), re-encoded as JPEG and
+  squeezed under 400KB before it's stored. Changing your photo also refreshes
+  your avatar inside existing inbox conversations. Tapping a photo (including
+  in Donation history) opens it full-screen.
+- **Blood group is locked** after it's saved. "Contact us to change" opens a
+  pre-filled Gmail draft to `raktjaal@gmail.com` (name, account email, current
+  group). After you verify the proof, unlock that user (see *Admin: unlock a
+  blood group* below); they can then pick the correct group once, and it locks
+  again automatically.
+- Password changes made from the profile page send a "your password was
+  changed" security email.
+- Donation history lists verified donations only; there is no "eligible again"
+  countdown.
 - Inline profile editing, session/device info, and account deletion, all
   wired to the real Firebase Auth + Firestore profile — not local state.
+
+### Inbox, notifications and filters
+- The inbox is resizable: drag the divider between the sidebar and the page,
+  or between the conversation list and the chat (double-click a divider to
+  reset). Widths are remembered per browser.
+- Notifications are actionable. Tapping one jumps to the right screen, and
+  requests can be handled straight from the bell: **Approve / Decline** a
+  direct request, **I can donate** on an open request, **Open chat**, or
+  **Confirm donation**. New notifications carry `kind`, `requestId` and
+  `threadId` fields (see `AppNotification`).
+- Donate Blood filters use custom dropdowns: a blood-group chip grid and a
+  search-radius list with a Reset button.
 
 ### Product surface (UI-complete, partly mocked)
 - A full marketing landing page, redesigned auth screens, and an
@@ -177,6 +201,9 @@ RaktJaal/
 │   │   ├── api/email-otp/send/route.ts    Generates + emails a 6-digit OTP
 │   │   ├── api/email-otp/verify/route.ts  Verifies an OTP (registration or deletion)
 │   │   ├── api/account/delete/route.ts    OTP-gated account + profile deletion
+│   │   ├── api/account/disable-2fa/route.ts  OTP-gated "turn off two-step"
+│   │   ├── api/email/password-changed/route.ts  "Password changed" security email
+│   │   ├── api/admin/unlock-blood-type/route.ts Admin-only blood group unlock
 │   │   ├── layout.tsx                Root layout — wraps app in AuthProvider + SiteChrome
 │   │   └── globals.css               Tailwind base + shared utility classes
 │   ├── frontend/
@@ -225,6 +252,30 @@ RaktJaal/
 - Account deletion also requires a fresh OTP: `/api/account/delete` verifies
   the code server-side, then deletes the `users/{uid}` Firestore doc and the
   Firebase Auth user in the same request.
+- **Two-step verification**: turning it on needs an emailed OTP. Turning it
+  **off** also needs a fresh emailed OTP (`purpose: "disable2fa"`), checked by
+  `POST /api/account/disable-2fa`. Firestore rules stop the browser from
+  clearing `twoFactorEnabled` itself, so "Turn off" alone can't bypass it.
+- **Blood group lock** is enforced in `firestore.rules` too: `bloodType` can
+  only change while `bloodTypeUnlocked == true`, and only the server can set
+  that flag.
+
+### Admin: unlock a blood group
+After a user emails proof to `raktjaal@gmail.com`, unlock them with the same
+secret used for broadcasts (`ADMIN_BROADCAST_SECRET`):
+
+```bash
+curl -X POST https://YOUR-APP/api/admin/unlock-blood-type \
+  -H "Content-Type: application/json" \
+  -d '{"secret":"<ADMIN_BROADCAST_SECRET>","email":"user@example.com"}'
+```
+
+The user gets an in-app notification and can re-select their blood group once.
+Add `"lock": true` to re-lock without a change.
+
+### Deploying rules
+Rules changed (users guard, notification fields). Deploy them **before** the
+app: `firebase deploy --only firestore:rules`.
 
 ---
 

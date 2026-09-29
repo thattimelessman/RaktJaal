@@ -1,0 +1,1462 @@
+diff --git a/README.md b/README.md
+index 6855a5b..0d4b897 100644
+--- a/README.md
++++ b/README.md
+@@ -83,11 +83,35 @@ scaffolded so Phases 2–5 (below) are additions, not rewrites.
+ - A real `users/{uid}` Firestore profile (name, DOB, address, blood type,
+   phone, secondary emails, profile photo) — separate from the `donors`
+   collection, which exists purely for geo-matching and needs phone + lat/lng.
+-- Profile photo upload with client-side compression: every photo is
+-  re-encoded as JPEG and squeezed under 400KB before it's stored.
++- Profile photo upload with client-side processing: every photo is
++  center-cropped to a square (1:1, like Instagram), re-encoded as JPEG and
++  squeezed under 400KB before it's stored. Changing your photo also refreshes
++  your avatar inside existing inbox conversations. Tapping a photo (including
++  in Donation history) opens it full-screen.
++- **Blood group is locked** after it's saved. "Contact us to change" opens a
++  pre-filled Gmail draft to `raktjaal@gmail.com` (name, account email, current
++  group). After you verify the proof, unlock that user (see *Admin: unlock a
++  blood group* below); they can then pick the correct group once, and it locks
++  again automatically.
++- Password changes made from the profile page send a "your password was
++  changed" security email.
++- Donation history lists verified donations only; there is no "eligible again"
++  countdown.
+ - Inline profile editing, session/device info, and account deletion, all
+   wired to the real Firebase Auth + Firestore profile — not local state.
+ 
++### Inbox, notifications and filters
++- The inbox is resizable: drag the divider between the sidebar and the page,
++  or between the conversation list and the chat (double-click a divider to
++  reset). Widths are remembered per browser.
++- Notifications are actionable. Tapping one jumps to the right screen, and
++  requests can be handled straight from the bell: **Approve / Decline** a
++  direct request, **I can donate** on an open request, **Open chat**, or
++  **Confirm donation**. New notifications carry `kind`, `requestId` and
++  `threadId` fields (see `AppNotification`).
++- Donate Blood filters use custom dropdowns: a blood-group chip grid and a
++  search-radius list with a Reset button.
++
+ ### Product surface (UI-complete, partly mocked)
+ - A full marketing landing page, redesigned auth screens, and an
+   **ActionPage** — the two-tab "Need Blood" / "Donate Blood" screen a
+@@ -177,6 +201,9 @@ RaktJaal/
+ │   │   ├── api/email-otp/send/route.ts    Generates + emails a 6-digit OTP
+ │   │   ├── api/email-otp/verify/route.ts  Verifies an OTP (registration or deletion)
+ │   │   ├── api/account/delete/route.ts    OTP-gated account + profile deletion
++│   │   ├── api/account/disable-2fa/route.ts  OTP-gated "turn off two-step"
++│   │   ├── api/email/password-changed/route.ts  "Password changed" security email
++│   │   ├── api/admin/unlock-blood-type/route.ts Admin-only blood group unlock
+ │   │   ├── layout.tsx                Root layout — wraps app in AuthProvider + SiteChrome
+ │   │   └── globals.css               Tailwind base + shared utility classes
+ │   ├── frontend/
+@@ -225,6 +252,30 @@ RaktJaal/
+ - Account deletion also requires a fresh OTP: `/api/account/delete` verifies
+   the code server-side, then deletes the `users/{uid}` Firestore doc and the
+   Firebase Auth user in the same request.
++- **Two-step verification**: turning it on needs an emailed OTP. Turning it
++  **off** also needs a fresh emailed OTP (`purpose: "disable2fa"`), checked by
++  `POST /api/account/disable-2fa`. Firestore rules stop the browser from
++  clearing `twoFactorEnabled` itself, so "Turn off" alone can't bypass it.
++- **Blood group lock** is enforced in `firestore.rules` too: `bloodType` can
++  only change while `bloodTypeUnlocked == true`, and only the server can set
++  that flag.
++
++### Admin: unlock a blood group
++After a user emails proof to `raktjaal@gmail.com`, unlock them with the same
++secret used for broadcasts (`ADMIN_BROADCAST_SECRET`):
++
++```bash
++curl -X POST https://YOUR-APP/api/admin/unlock-blood-type \
++  -H "Content-Type: application/json" \
++  -d '{"secret":"<ADMIN_BROADCAST_SECRET>","email":"user@example.com"}'
++```
++
++The user gets an in-app notification and can re-select their blood group once.
++Add `"lock": true` to re-lock without a change.
++
++### Deploying rules
++Rules changed (users guard, notification fields). Deploy them **before** the
++app: `firebase deploy --only firestore:rules`.
+ 
+ ---
+ 
+diff --git a/firestore.rules b/firestore.rules
+index 706c796..6ea0446 100644
+--- a/firestore.rules
++++ b/firestore.rules
+@@ -16,7 +16,31 @@ service cloud.firestore {
+        (Server routes use the Admin SDK and bypass these rules.)
+     ---------------------------------------------------------------- */
+     match /users/{uid} {
+-      allow read, create, update, delete: if isSelf(uid);
++      allow read, create: if isSelf(uid);
++
++      // Safety-critical fields are guarded server-side, not just in the UI:
++      //  - bloodType can only change while bloodTypeUnlocked == true (set by an
++      //    admin via /api/admin/unlock-blood-type after a support request)
++      //  - a client can never set bloodTypeUnlocked to true itself
++      //  - twoFactorEnabled can be turned ON by the owner, but only the server
++      //    (/api/account/disable-2fa, after an email OTP) can turn it OFF
++      allow update: if isSelf(uid)
++        && (
++          resource.data.get('bloodType', '') == ''
++          || request.resource.data.get('bloodType', '') == resource.data.get('bloodType', '')
++          || resource.data.get('bloodTypeUnlocked', false) == true
++        )
++        && (
++          request.resource.data.get('bloodTypeUnlocked', false) == false
++          || request.resource.data.get('bloodTypeUnlocked', false) == resource.data.get('bloodTypeUnlocked', false)
++        )
++        && (
++          resource.data.get('twoFactorEnabled', false) == false
++          || request.resource.data.get('twoFactorEnabled', false) == true
++        );
++
++      // Accounts are deleted through /api/account/delete (Admin SDK).
++      allow delete: if false;
+     }
+ 
+     /* ---------------------------------------------------------------
+@@ -224,7 +248,10 @@ service cloud.firestore {
+       allow read: if signedIn() && resource.data.uid == request.auth.uid;
+ 
+       allow create: if signedIn()
+-        && request.resource.data.keys().hasOnly(['uid', 'title', 'body', 'tone', 'read', 'createdAt'])
++        && request.resource.data.keys().hasOnly(['uid', 'title', 'body', 'tone', 'read', 'createdAt', 'kind', 'requestId', 'threadId'])
++        && (!('kind' in request.resource.data) || request.resource.data.kind in [
++             'incoming-request', 'open-request', 'thread', 'sent-update', 'confirm-donation', 'history', 'profile'
++           ])
+         && request.resource.data.read == false
+         && request.resource.data.tone in ['info', 'success']
+         && request.resource.data.title is string && request.resource.data.title.size() <= 120
+diff --git a/src/app/action/page.jsx b/src/app/action/page.jsx
+index 63bc514..2cb3494 100644
+--- a/src/app/action/page.jsx
++++ b/src/app/action/page.jsx
+@@ -14,6 +14,7 @@ import {
+   subscribeMessages,
+   subscribeAllPendingRequests,
+   confirmDonation,
++  getRequestById,
+   timeAgo,
+   MAX_INLINE_ATTACHMENT_BYTES,
+ } from "@/backend/lib/requests";
+@@ -40,6 +41,8 @@ import {
+   Building2,
+   SlidersHorizontal,
+   BadgeCheck,
++  ChevronDown,
++  RotateCcw,
+ } from "lucide-react";
+ 
+ /* -----------------------------------------------------------------
+@@ -606,8 +609,131 @@ function FileBubble({ file, isMine }) {
+ /* ---------------------------------------------------------------
+    Notification bell + dropdown
+ ------------------------------------------------------------------ */
+-function NotificationBell({ notifications, ready, onMarkAllRead }) {
++/* One notification row. Tapping the row jumps to the relevant screen; the
++   buttons act right here (approve / decline / accept / open chat / confirm). */
++function NotificationItem({ n, ctx }) {
++  const [busy, setBusy] = useState("");
++  const [msg, setMsg] = useState("");
++  const req = n.requestId ? ctx.findRequest(n.requestId) : null;
++
++  const run = async (label, fn) => {
++    setBusy(label);
++    setMsg("");
++    ctx.setWorking(true);
++    try {
++      await fn();
++      ctx.markRead(n);
++    } catch (e) {
++      const m = e?.message || "Something went wrong.";
++      setMsg(/permission|insufficient/i.test(m) ? "This request is no longer available, or doesn't match your blood group." : m);
++    } finally {
++      setBusy("");
++      ctx.setWorking(false);
++    }
++  };
++
++  const btnBase = "text-[11.5px] px-3 py-1.5 rounded-full transition-opacity hover:opacity-85 disabled:opacity-50";
++  const primary = { background: C.ink, color: "#fff", fontFamily: F, fontWeight: 700 };
++  const danger = { background: C.chip, color: C.brickDark, fontFamily: F, fontWeight: 700 };
++  const ghost = { background: C.chip, color: C.ink, fontFamily: F, fontWeight: 700 };
++  const Btn = ({ label, busyLabel, style, onClick }) => (
++    <button
++      disabled={Boolean(busy)}
++      onClick={(e) => { e.stopPropagation(); onClick(); }}
++      className={btnBase}
++      style={style}
++    >
++      {busy === label ? busyLabel : label}
++    </button>
++  );
++
++  let actions = null;
++  let note = "";
++  if (n.kind === "incoming-request") {
++    if (!req) actions = <Btn label="View" style={ghost} onClick={() => ctx.go(n)} />;
++    else if (req.status === "pending") {
++      actions = (
++        <>
++          <Btn label="Approve" busyLabel="Approving…" style={primary} onClick={() => run("Approve", () => ctx.approve(req))} />
++          <Btn label="Decline" busyLabel="Declining…" style={danger} onClick={() => run("Decline", () => ctx.decline(req))} />
++        </>
++      );
++    } else if (req.status === "approved") {
++      actions = <Btn label="Open chat" style={primary} onClick={() => ctx.openThread(req.threadId || req.id)} />;
++    } else note = `You ${req.status} this request.`;
++  } else if (n.kind === "open-request") {
++    actions = (
++      <>
++        <Btn
++          label="I can donate"
++          busyLabel="Accepting…"
++          style={primary}
++          onClick={() =>
++            run("I can donate", async () => {
++              const r = await getRequestById(n.requestId);
++              if (!r || r.status !== "pending" || r.donorUid) throw new Error("Someone else already accepted this request.");
++              await ctx.acceptOpen(r);
++              ctx.openThread(r.id);
++            })
++          }
++        />
++        <Btn label="View" style={ghost} onClick={() => ctx.go(n)} />
++      </>
++    );
++  } else if (n.kind === "thread") {
++    actions = <Btn label="Open chat" style={primary} onClick={() => ctx.openThread(n.threadId || n.requestId)} />;
++  } else if (n.kind === "sent-update") {
++    actions = <Btn label="View request" style={primary} onClick={() => ctx.go(n)} />;
++  } else if (n.kind === "confirm-donation") {
++    const mine = req ? (req.donorUid === ctx.meUid ? req.donorConfirmedAt : req.requesterConfirmedAt) : null;
++    if (req && req.status === "approved" && !mine) {
++      actions = (
++        <>
++          <Btn label="Confirm donation" busyLabel="Confirming…" style={primary} onClick={() => run("Confirm donation", () => ctx.confirm(req))} />
++          <Btn label="View" style={ghost} onClick={() => ctx.go(n)} />
++        </>
++      );
++    } else if (mine) note = "You've confirmed this donation.";
++    else actions = <Btn label="View" style={ghost} onClick={() => ctx.go(n)} />;
++  } else if (n.kind === "history") {
++    actions = <Btn label="View history" style={primary} onClick={() => ctx.go(n)} />;
++  } else if (n.kind === "profile") {
++    actions = <Btn label="Open profile" style={primary} onClick={() => ctx.go(n)} />;
++  }
++
++  const clickable = Boolean(n.kind);
++  return (
++    <div
++      role={clickable ? "button" : undefined}
++      tabIndex={clickable ? 0 : undefined}
++      onClick={() => clickable && ctx.go(n)}
++      onKeyDown={(e) => clickable && e.key === "Enter" && ctx.go(n)}
++      className="flex items-start gap-3 px-4 py-3.5 transition-colors hover:bg-[#FAFAFA]"
++      style={{ borderBottom: `1px solid ${C.border}`, background: n.read ? "transparent" : "#FEF6F6", cursor: clickable ? "pointer" : "default" }}
++    >
++      <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0" style={{ background: n.tone === "success" ? C.mint : C.blush }}>
++        {n.tone === "success" ? <Check size={13} color="#1F6B3A" /> : <Bell size={13} color={C.brickDark} />}
++      </div>
++      <div className="min-w-0 flex-1">
++        <p className="text-[13px]" style={{ color: C.ink, fontFamily: F, fontWeight: 700 }}>{n.title}</p>
++        <p className="text-[12px] mt-0.5 leading-relaxed" style={{ color: C.sub, fontFamily: F }}>{n.body}</p>
++        {(actions || note) && (
++          <div className="flex items-center gap-1.5 mt-2.5 flex-wrap">
++            {actions}
++            {note && <span className="text-[11.5px]" style={{ color: C.sub, fontFamily: F, fontWeight: 600 }}>{note}</span>}
++          </div>
++        )}
++        {msg && <p className="text-[11.5px] mt-2" style={{ color: C.brickDark, fontFamily: F }}>{msg}</p>}
++        <p className="text-[10.5px] mt-1.5" style={{ color: C.faint, fontFamily: F, fontWeight: 600 }}>{timeAgo(n.createdAt)}</p>
++      </div>
++      {!n.read && <span className="w-1.5 h-1.5 rounded-full mt-2 shrink-0" style={{ background: C.brick }} />}
++    </div>
++  );
++}
++
++function NotificationBell({ notifications, ready, onMarkAllRead, actions }) {
+   const [open, setOpen] = useState(false);
++  const [working, setWorking] = useState(false);
+   const [hover, setHover] = useState(false);
+   const [ringing, setRinging] = useState(false);
+   const [toast, setToast] = useState(null);
+@@ -663,11 +789,27 @@ function NotificationBell({ notifications, ready, onMarkAllRead }) {
+ 
+   // Auto-close after 3 seconds of inactivity
+   useEffect(() => {
+-    if (open && !hover) {
+-      const t = setTimeout(() => setOpen(false), 3000);
++    if (open && !hover && !working) {
++      const t = setTimeout(() => setOpen(false), 8000);
+       return () => clearTimeout(t);
+     }
+-  }, [open, hover]);
++  }, [open, hover, working]);
++
++  // Everything a notification row needs to act in place.
++  const ctx = {
++    ...actions,
++    setWorking,
++    markRead: (n) => { if (!n.read) actions.markOneRead?.(n.id)?.catch?.(() => {}); },
++    go: (n) => {
++      if (!n.read) actions.markOneRead?.(n.id)?.catch?.(() => {});
++      setOpen(false);
++      actions.go(n);
++    },
++    openThread: (id) => {
++      setOpen(false);
++      actions.openThread(id);
++    },
++  };
+ 
+   return (
+     <div 
+@@ -697,7 +839,9 @@ function NotificationBell({ notifications, ready, onMarkAllRead }) {
+ 
+       {toast && !open && (
+         <div
+-          className="absolute right-0 top-12 z-30 w-[300px] p-3.5 rounded-2xl bg-white flex items-start gap-2.5 pointer-events-none"
++          role="button"
++          onClick={() => { setToast(null); setOpen(true); }}
++          className="absolute right-0 top-12 z-30 w-[300px] p-3.5 rounded-2xl bg-white flex items-start gap-2.5 cursor-pointer"
+           style={{ border: `1px solid ${C.border}`, boxShadow: "0 24px 60px -18px rgba(0,0,0,0.25)", animation: "toastInOut 2.5s ease forwards" }}
+         >
+           <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0" style={{ background: toast.tone === "success" ? C.mint : C.blush }}>
+@@ -742,21 +886,7 @@ function NotificationBell({ notifications, ready, onMarkAllRead }) {
+           ) : (
+             <div className="flex flex-col">
+               {notifications.map((n) => (
+-                <div
+-                  key={n.id}
+-                  className="flex items-start gap-3 px-4 py-3.5 transition-colors hover:bg-[#FAFAFA]"
+-                  style={{ borderBottom: `1px solid ${C.border}`, background: n.read ? "transparent" : "#FEF6F6" }}
+-                >
+-                  <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0" style={{ background: n.tone === "success" ? C.mint : C.blush }}>
+-                    {n.tone === "success" ? <Check size={13} color="#1F6B3A" /> : <Bell size={13} color={C.brickDark} />}
+-                  </div>
+-                  <div className="min-w-0 flex-1">
+-                    <p className="text-[13px]" style={{ color: C.ink, fontFamily: F, fontWeight: 700 }}>{n.title}</p>
+-                    <p className="text-[12px] mt-0.5 leading-relaxed" style={{ color: C.sub, fontFamily: F }}>{n.body}</p>
+-                    <p className="text-[10.5px] mt-1.5" style={{ color: C.faint, fontFamily: F, fontWeight: 600 }}>{timeAgo(n.createdAt)}</p>
+-                  </div>
+-                  {!n.read && <span className="w-1.5 h-1.5 rounded-full mt-2 shrink-0" style={{ background: C.brick }} />}
+-                </div>
++                <NotificationItem key={n.id} n={n} ctx={ctx} />
+               ))}
+             </div>
+           )}
+@@ -780,7 +910,189 @@ function ThreadCallButton({ thread, meUid }) {
+    Inbox — thread list + a simple chat view. All state-local; no
+    messages are actually delivered anywhere.
+ ------------------------------------------------------------------ */
++/* ---------------------------------------------------------------
++   Small UI helpers: drag-to-resize panes and a nicer filter dropdown.
++------------------------------------------------------------------ */
++function useResizableWidth(storageKey, initial, min, max) {
++  const [w, setW] = useState(initial);
++  useEffect(() => {
++    try {
++      const v = Number(localStorage.getItem(storageKey));
++      if (v >= min && v <= max) setW(v);
++    } catch { /* storage unavailable */ }
++    // eslint-disable-next-line react-hooks/exhaustive-deps
++  }, []);
++  const startDrag = (e) => {
++    e.preventDefault();
++    const startX = e.clientX;
++    const startW = w;
++    let latest = startW;
++    document.body.style.userSelect = "none";
++    document.body.style.cursor = "col-resize";
++    const move = (ev) => {
++      latest = Math.min(max, Math.max(min, startW + ev.clientX - startX));
++      setW(latest);
++    };
++    const up = () => {
++      window.removeEventListener("pointermove", move);
++      window.removeEventListener("pointerup", up);
++      document.body.style.userSelect = "";
++      document.body.style.cursor = "";
++      try { localStorage.setItem(storageKey, String(latest)); } catch { /* ignore */ }
++    };
++    window.addEventListener("pointermove", move);
++    window.addEventListener("pointerup", up);
++  };
++  const reset = () => {
++    setW(initial);
++    try { localStorage.removeItem(storageKey); } catch { /* ignore */ }
++  };
++  return [w, startDrag, reset];
++}
++
++/* A thin draggable divider between two panes. Double-click resets the width. */
++function ResizeHandle({ onPointerDown, onDoubleClick }) {
++  return (
++    <div
++      role="separator"
++      aria-orientation="vertical"
++      title="Drag to resize · double-click to reset"
++      onPointerDown={onPointerDown}
++      onDoubleClick={onDoubleClick}
++      className="hidden sm:block relative shrink-0 z-10 group"
++      style={{ width: 8, margin: "0 -4px", cursor: "col-resize", touchAction: "none" }}
++    >
++      <div
++        className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-[3px] rounded-full opacity-0 group-hover:opacity-100 group-active:opacity-100 transition-opacity"
++        style={{ background: C.brick }}
++      />
++    </div>
++  );
++}
++
++/* Pill button that opens a floating panel (blood group grid, distance list…). */
++function FilterDropdown({ icon: Icon, label, valueLabel, active, width = 264, children }) {
++  const [open, setOpen] = useState(false);
++  const ref = useRef(null);
++  useEffect(() => {
++    if (!open) return;
++    const onDoc = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
++    const onKey = (e) => { if (e.key === "Escape") setOpen(false); };
++    document.addEventListener("mousedown", onDoc);
++    document.addEventListener("keydown", onKey);
++    return () => {
++      document.removeEventListener("mousedown", onDoc);
++      document.removeEventListener("keydown", onKey);
++    };
++  }, [open]);
++
++  return (
++    <div className="relative" ref={ref}>
++      <button
++        onClick={() => setOpen((o) => !o)}
++        aria-haspopup="listbox"
++        aria-expanded={open}
++        className="flex items-center gap-1.5 text-xs pl-3 pr-2.5 py-2 rounded-full transition-all active:scale-[0.97]"
++        style={{
++          border: `1px solid ${active ? C.ink : C.border}`,
++          background: active ? C.ink : "#fff",
++          color: active ? "#fff" : C.ink,
++          fontFamily: F,
++          fontWeight: 700,
++          boxShadow: open ? "0 4px 14px -6px rgba(0,0,0,0.3)" : "none",
++        }}
++      >
++        <Icon size={12} />
++        <span style={{ opacity: 0.6, fontWeight: 600 }}>{label}</span>
++        <span>{valueLabel}</span>
++        <ChevronDown size={13} style={{ transform: open ? "rotate(180deg)" : "none", transition: "transform 0.15s" }} />
++      </button>
++      {open && (
++        <div
++          className="absolute left-0 top-full mt-2 z-40 rounded-2xl bg-white p-3"
++          style={{ width, maxWidth: "88vw", border: `1px solid ${C.border}`, boxShadow: "0 24px 60px -18px rgba(0,0,0,0.28)", animation: "scaleUp 0.14s ease-out forwards", transformOrigin: "top left" }}
++        >
++          {children(() => setOpen(false))}
++        </div>
++      )}
++    </div>
++  );
++}
++
++const DISTANCE_HINTS = { 10: "Walking / very close", 25: "Around your city", 50: "Nearby towns", 100: "Wide search" };
++
++function BloodGroupFilter({ value, onChange }) {
++  return (
++    <FilterDropdown icon={Droplet} label="Blood" valueLabel={value === "ALL" ? "All groups" : value} active={value !== "ALL"}>
++      {(close) => (
++        <div>
++          <p className="text-[10.5px] uppercase tracking-wide font-bold mb-2 px-1" style={{ color: C.faint, fontFamily: F }}>Blood group</p>
++          <button
++            onClick={() => { onChange("ALL"); close(); }}
++            className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-[13px] mb-2 transition-colors hover:bg-[#F4F4F5]"
++            style={{ background: value === "ALL" ? C.chip : "transparent", color: C.ink, fontFamily: F, fontWeight: 700 }}
++          >
++            All blood groups
++            {value === "ALL" && <Check size={14} color={C.brick} />}
++          </button>
++          <div className="grid grid-cols-4 gap-1.5">
++            {BLOOD_TYPES.map((bt) => {
++              const on = value === bt;
++              return (
++                <button
++                  key={bt}
++                  onClick={() => { onChange(bt); close(); }}
++                  className="py-2 rounded-xl text-[13px] transition-all active:scale-95"
++                  style={{
++                    background: on ? C.brick : C.chip,
++                    color: on ? "#fff" : C.ink,
++                    fontFamily: F,
++                    fontWeight: 800,
++                    boxShadow: on ? "0 4px 10px -3px rgba(214,48,63,0.55)" : "none",
++                  }}
++                >
++                  {bt}
++                </button>
++              );
++            })}
++          </div>
++        </div>
++      )}
++    </FilterDropdown>
++  );
++}
++
++function DistanceFilter({ value, onChange }) {
++  return (
++    <FilterDropdown icon={MapPin} label="Range" valueLabel={`${value} km`} active={value !== 25} width={248}>
++      {(close) => (
++        <div>
++          <p className="text-[10.5px] uppercase tracking-wide font-bold mb-1.5 px-1" style={{ color: C.faint, fontFamily: F }}>Search radius</p>
++          {DISTANCE_OPTIONS.map((d) => {
++            const on = value === d;
++            return (
++              <button
++                key={d}
++                onClick={() => { onChange(d); close(); }}
++                className="w-full flex items-center justify-between gap-3 px-3 py-2.5 rounded-xl text-left transition-colors hover:bg-[#F4F4F5]"
++                style={{ background: on ? C.chip : "transparent" }}
++              >
++                <span>
++                  <span className="block text-[13px]" style={{ color: C.ink, fontFamily: F, fontWeight: 700 }}>Within {d} km</span>
++                  <span className="block text-[11px] mt-0.5" style={{ color: C.sub, fontFamily: F }}>{DISTANCE_HINTS[d]}</span>
++                </span>
++                {on && <Check size={14} color={C.brick} />}
++              </button>
++            );
++          })}
++        </div>
++      )}
++    </FilterDropdown>
++  );
++}
++
+ function InboxPanel({ me, threads, activeThreadId, onSelectThread, onSend, onMarkRead, onBack }) {
++  const [listW, startListDrag, resetListW] = useResizableWidth("rk-inbox-list-w", 288, 220, 520);
+   const [draft, setDraft] = useState("");
+   const [sendError, setSendError] = useState("");
+   const [messages, setMessages] = useState([]);
+@@ -867,7 +1179,7 @@ function InboxPanel({ me, threads, activeThreadId, onSelectThread, onSend, onMar
+   return (
+     <div className="flex-1 flex min-h-0">
+       {/* thread list */}
+-      <div className={`w-full sm:w-72 shrink-0 flex-col ${active ? "hidden sm:flex" : "flex"}`} style={{ borderRight: `1px solid ${C.border}` }}>
++      <div className={`w-full sm:w-[var(--lw)] shrink-0 flex-col ${active ? "hidden sm:flex" : "flex"}`} style={{ borderRight: `1px solid ${C.border}`, "--lw": `${listW}px` }}>
+         <div className="px-5 py-4" style={{ borderBottom: `1px solid ${C.border}` }}>
+           <h2 className="text-[17px] font-bold tracking-tight" style={{ color: C.ink, fontFamily: F }}>Inbox</h2>
+         </div>
+@@ -904,6 +1216,8 @@ function InboxPanel({ me, threads, activeThreadId, onSelectThread, onSend, onMar
+         </div>
+       </div>
+ 
++      <ResizeHandle onPointerDown={startListDrag} onDoubleClick={resetListW} />
++
+       {/* active thread */}
+       <div className={`flex-1 flex-col min-w-0 ${active ? "flex" : "hidden sm:flex"}`}>
+         {active ? (
+@@ -2040,28 +2354,16 @@ function DonateBloodFlow({ me, incoming, donorSync, onApprove, onDecline, onAcce
+             <span className="flex items-center gap-1 text-[11px]" style={{ color: C.faint, fontFamily: F }}>
+               <SlidersHorizontal size={11} /> Filters:
+             </span>
+-            <select
+-              value={browseBloodType}
+-              onChange={(e) => setBrowseBloodType(e.target.value)}
+-              className="text-xs px-2.5 py-1.5 rounded-full outline-none"
+-              style={{ border: `1px solid ${C.border}`, color: C.ink, fontFamily: F, fontWeight: 600, background: "#fff" }}
+-            >
+-              <option value="ALL">All blood groups</option>
+-              {BLOOD_TYPES.map((bt) => (
+-                <option key={bt} value={bt}>{bt}</option>
+-              ))}
+-            </select>
+-            {browseMode === "nearby" && (
+-              <select
+-                value={browseDistanceKm}
+-                onChange={(e) => setBrowseDistanceKm(Number(e.target.value))}
+-                className="text-xs px-2.5 py-1.5 rounded-full outline-none"
+-                style={{ border: `1px solid ${C.border}`, color: C.ink, fontFamily: F, fontWeight: 600, background: "#fff" }}
++            <BloodGroupFilter value={browseBloodType} onChange={setBrowseBloodType} />
++            {browseMode === "nearby" && <DistanceFilter value={browseDistanceKm} onChange={setBrowseDistanceKm} />}
++            {(browseBloodType !== "ALL" || (browseMode === "nearby" && browseDistanceKm !== 25)) && (
++              <button
++                onClick={() => { setBrowseBloodType("ALL"); setBrowseDistanceKm(25); }}
++                className="flex items-center gap-1 text-[11.5px] px-2.5 py-1.5 rounded-full transition-colors hover:bg-[#F4F4F5]"
++                style={{ color: C.sub, fontFamily: F, fontWeight: 700 }}
+               >
+-                {DISTANCE_OPTIONS.map((d) => (
+-                  <option key={d} value={d}>within {d} km</option>
+-                ))}
+-              </select>
++                <RotateCcw size={11} /> Reset
++              </button>
+             )}
+           </div>
+         )}
+@@ -2367,6 +2669,7 @@ function ActionPageInner() {
+ 
+   // Everything live: donor publishing, sent/incoming requests, threads, notifications.
+   const backend = useRequestsBackend(user, profileComplete);
++  const [sidebarW, startSidebarDrag, resetSidebarW] = useResizableWidth("rk-sidebar-w", 256, 200, 380);
+ 
+   if (authLoading || profileLoading) return null; // brief flash while Firebase resolves the session
+   if (!user) return <SignedOut />;
+@@ -2379,6 +2682,33 @@ function ActionPageInner() {
+     setView("inbox");
+   };
+ 
++  // Default destination when a notification row is tapped.
++  const handleNotificationGo = (n) => {
++    switch (n.kind) {
++      case "thread":
++        handleOpenThread(n.threadId || n.requestId);
++        break;
++      case "incoming-request":
++      case "open-request":
++        goTo("donate");
++        break;
++      case "sent-update":
++        goTo("need");
++        break;
++      case "confirm-donation":
++        goTo(backend.incoming.some((r) => r.id === n.requestId) ? "donate" : "need");
++        break;
++      case "history":
++        router.push("/profile#donation-history");
++        break;
++      case "profile":
++        router.push("/profile");
++        break;
++      default:
++        break;
++    }
++  };
++
+   const initials = user.name?.trim()
+     ? user.name.trim().split(/\s+/).slice(0, 2).map((p) => p[0]?.toUpperCase()).join("")
+     : "?";
+@@ -2412,8 +2742,8 @@ function ActionPageInner() {
+ 
+       {/* ---- Left sidebar (desktop) ---- */}
+       <aside
+-        className="hidden sm:flex sm:w-64 shrink-0 h-full flex-col"
+-        style={{ borderRight: `1px solid ${C.border}`, background: C.sidebar }}
++        className="hidden sm:flex sm:w-[var(--sw)] shrink-0 h-full flex-col"
++        style={{ borderRight: `1px solid ${C.border}`, background: C.sidebar, "--sw": `${sidebarW}px` }}
+       >
+         <div className="px-6 pt-6 pb-1 flex flex-col items-start">
+           <button onClick={() => router.push("/")} className="flex items-center gap-2.5 text-left">
+@@ -2460,6 +2790,7 @@ function ActionPageInner() {
+           })}
+         </nav>
+       </aside>
++      <ResizeHandle onPointerDown={startSidebarDrag} onDoubleClick={resetSidebarW} />
+ 
+       {/* ---- Main column ---- */}
+       <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden">
+@@ -2486,7 +2817,22 @@ function ActionPageInner() {
+           <div className="hidden sm:block" />
+ 
+           <div className="flex items-center gap-3">
+-            <NotificationBell notifications={backend.notifications} ready={backend.notificationsReady} onMarkAllRead={backend.markAllRead} />
++            <NotificationBell
++              notifications={backend.notifications}
++              ready={backend.notificationsReady}
++              onMarkAllRead={backend.markAllRead}
++              actions={{
++                meUid: user.uid,
++                markOneRead: backend.markOneRead,
++                findRequest: (id) => backend.incoming.find((r) => r.id === id) || backend.sent.find((r) => r.id === id) || null,
++                approve: backend.approve,
++                decline: backend.decline,
++                acceptOpen: backend.acceptOpen,
++                confirm: (req) => confirmDonation(req, user.uid),
++                openThread: handleOpenThread,
++                go: handleNotificationGo,
++              }}
++            />
+             <button
+               onClick={() => router.push("/profile")}
+               aria-label="Your profile"
+diff --git a/src/app/api/account/disable-2fa/route.ts b/src/app/api/account/disable-2fa/route.ts
+new file mode 100644
+index 0000000..259c521
+--- /dev/null
++++ b/src/app/api/account/disable-2fa/route.ts
+@@ -0,0 +1,31 @@
++import { NextResponse } from "next/server";
++import { adminAuth, adminDb } from "@/backend/lib/firebaseAdmin";
++import { verifyEmailOtp } from "@/backend/lib/emailOtp";
++
++export const runtime = "nodejs";
++
++/**
++ * Turns two-step verification OFF, but only after the account owner proves
++ * they can read their email by entering a fresh OTP (purpose "disable2fa").
++ * Firestore rules stop the client from clearing twoFactorEnabled itself, so
++ * this route (Admin SDK) is the only way to opt out.
++ */
++export async function POST(request: Request) {
++  try {
++    const authHeader = request.headers.get("authorization") || "";
++    if (!authHeader.startsWith("Bearer ")) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
++    const decoded = await adminAuth.verifyIdToken(authHeader.slice(7));
++    const { code } = await request.json();
++    if (!/^\d{6}$/.test(String(code || ""))) return NextResponse.json({ error: "Enter the 6-digit OTP." }, { status: 400 });
++
++    const user = await adminAuth.getUser(decoded.uid);
++    if (!user.email) return NextResponse.json({ error: "No email address is available for this account." }, { status: 400 });
++    await verifyEmailOtp(user.uid, user.email, "disable2fa", String(code));
++
++    await adminDb.doc(`users/${user.uid}`).set({ twoFactorEnabled: false, updatedAt: Date.now() }, { merge: true });
++    return NextResponse.json({ ok: true });
++  } catch (err) {
++    console.error(err);
++    return NextResponse.json({ error: err instanceof Error ? err.message : "Could not turn off two-step verification." }, { status: 400 });
++  }
++}
+diff --git a/src/app/api/admin/unlock-blood-type/route.ts b/src/app/api/admin/unlock-blood-type/route.ts
+new file mode 100644
+index 0000000..dca52a8
+--- /dev/null
++++ b/src/app/api/admin/unlock-blood-type/route.ts
+@@ -0,0 +1,56 @@
++import { NextResponse } from "next/server";
++import { timingSafeEqual } from "crypto";
++import { adminAuth, adminDb } from "@/backend/lib/firebaseAdmin";
++
++export const runtime = "nodejs";
++
++const secretMatches = (given: unknown, expected: string) => {
++  if (typeof given !== "string") return false;
++  const a = Buffer.from(given);
++  const b = Buffer.from(expected);
++  return a.length === b.length && timingSafeEqual(a, b);
++};
++
++/**
++ * Admin-only: lets ONE user re-select their blood type after they emailed
++ * raktjaal@gmail.com with proof. Not wired to any UI; call it yourself
++ * (curl / Postman) once you've verified the request.
++ *
++ *   { secret, email }                -> unlock
++ *   { secret, email, lock: true }    -> re-lock without a change
++ *
++ * The user's profile then shows the blood-type picker once; saving a new
++ * value locks it again automatically.
++ */
++export async function POST(request: Request) {
++  try {
++    const body = await request.json();
++    const secret = process.env.ADMIN_BROADCAST_SECRET;
++    if (!secret || !secretMatches(body.secret, secret)) {
++      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
++    }
++    if (typeof body.email !== "string" || !body.email.includes("@")) {
++      return NextResponse.json({ error: "Missing email." }, { status: 400 });
++    }
++
++    const user = await adminAuth.getUserByEmail(body.email.trim().toLowerCase());
++    const unlock = body.lock !== true;
++    await adminDb.doc(`users/${user.uid}`).set({ bloodTypeUnlocked: unlock, updatedAt: Date.now() }, { merge: true });
++
++    if (unlock) {
++      await adminDb.collection("notifications").add({
++        uid: user.uid,
++        title: "Blood group unlocked",
++        body: "Our team approved your request. Open your profile to pick the correct blood group.",
++        tone: "success",
++        read: false,
++        createdAt: Date.now(),
++        kind: "profile",
++      });
++    }
++    return NextResponse.json({ ok: true, uid: user.uid, unlocked: unlock });
++  } catch (err) {
++    console.error(err);
++    return NextResponse.json({ error: err instanceof Error ? err.message : "Could not update the user." }, { status: 400 });
++  }
++}
+diff --git a/src/app/api/donation/verified/route.ts b/src/app/api/donation/verified/route.ts
+index 5e30ac4..3b20561 100644
+--- a/src/app/api/donation/verified/route.ts
++++ b/src/app/api/donation/verified/route.ts
+@@ -119,6 +119,8 @@ export async function POST(request: Request) {
+             tone: "info",
+             read: false,
+             createdAt: now,
++            kind: "confirm-donation",
++            requestId: req.id,
+           });
+         }
+         return {
+@@ -225,6 +227,7 @@ export async function POST(request: Request) {
+         tone: "success",
+         read: false,
+         createdAt: now2,
++        kind: "history",
+       });
+       batch.set(adminDb.collection("notifications").doc(), {
+         uid: req.requesterUid,
+@@ -233,6 +236,7 @@ export async function POST(request: Request) {
+         tone: "success",
+         read: false,
+         createdAt: now2,
++        kind: "history",
+       });
+       await batch.commit();
+     } catch (e) {
+diff --git a/src/app/api/email-otp/send/route.ts b/src/app/api/email-otp/send/route.ts
+index bfae9c5..ad18276 100644
+--- a/src/app/api/email-otp/send/route.ts
++++ b/src/app/api/email-otp/send/route.ts
+@@ -13,7 +13,7 @@ export async function POST(request: Request) {
+     if (!authHeader.startsWith("Bearer ")) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+     const decoded = await adminAuth.verifyIdToken(authHeader.slice(7));
+     const { purpose } = await request.json();
+-    if (purpose !== "registration" && purpose !== "delete" && purpose !== "twofactor") {
++    if (purpose !== "registration" && purpose !== "delete" && purpose !== "twofactor" && purpose !== "disable2fa") {
+       return NextResponse.json({ error: "Invalid OTP purpose" }, { status: 400 });
+     }
+ 
+diff --git a/src/app/api/email/password-changed/route.ts b/src/app/api/email/password-changed/route.ts
+new file mode 100644
+index 0000000..658a31a
+--- /dev/null
++++ b/src/app/api/email/password-changed/route.ts
+@@ -0,0 +1,31 @@
++import { NextResponse } from "next/server";
++import { adminAuth } from "@/backend/lib/firebaseAdmin";
++import { passwordChangedEmail } from "@/backend/lib/emailTemplates";
++import { getMailer } from "@/backend/lib/mailer";
++
++export const runtime = "nodejs";
++
++/** Best-effort security notice sent right after a password change from the profile page. */
++export async function POST(request: Request) {
++  try {
++    const authHeader = request.headers.get("authorization") || "";
++    if (!authHeader.startsWith("Bearer ")) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
++    const decoded = await adminAuth.verifyIdToken(authHeader.slice(7));
++
++    const mailer = getMailer();
++    if (!mailer) return NextResponse.json({ ok: true, skipped: "smtp-not-configured" });
++
++    const user = await adminAuth.getUser(decoded.uid);
++    if (!user.email) return NextResponse.json({ ok: true, skipped: "no-email" });
++
++    const { subject, text, html } = passwordChangedEmail({
++      name: user.displayName || "there",
++      time: new Date().toUTCString().replace("GMT", "UTC"),
++    });
++    await mailer.transporter.sendMail({ from: mailer.from, to: user.email, subject, text, html });
++    return NextResponse.json({ ok: true });
++  } catch (err) {
++    console.error(err);
++    return NextResponse.json({ ok: false, error: err instanceof Error ? err.message : "Could not send email." }, { status: 200 });
++  }
++}
+diff --git a/src/app/profile/page.jsx b/src/app/profile/page.jsx
+index e4eafa9..2d9b649 100644
+--- a/src/app/profile/page.jsx
++++ b/src/app/profile/page.jsx
+@@ -3,7 +3,7 @@
+ import { useEffect, useMemo, useRef, useState } from "react";
+ import { useRouter } from "next/navigation";
+ import { useAuth } from "@/frontend/hooks/useAuth";
+-import { signOutUser, sendEmailOtp, verifyEmailOtpCode, deleteAccountWithEmailOtp, hasPasswordProvider, setPasswordForGoogleAccount, changeAccountPassword } from "@/backend/lib/auth";
++import { signOutUser, sendEmailOtp, verifyEmailOtpCode, deleteAccountWithEmailOtp, hasPasswordProvider, setPasswordForGoogleAccount, changeAccountPassword, disableTwoFactorWithOtp } from "@/backend/lib/auth";
+ import { getUserProfile, updateUserProfile } from "@/backend/lib/userProfile";
+ import {
+   Droplet,
+@@ -99,16 +99,22 @@ function dataUrlByteLength(dataUrl) {
+  *  size down until the result fits under maxBytes. Returns null only if
+  *  even the smallest attempt can't get under the cap (essentially never
+  *  happens for a normal photo). */
+-function drawToConstrainedDataUrl(source, sourceWidth, sourceHeight, maxBytes = MAX_PHOTO_BYTES) {
+-  let maxDim = 800;
++function drawToConstrainedDataUrl(source, sourceWidth, sourceHeight, maxBytes = MAX_PHOTO_BYTES, square = false) {
++  let maxDim = square ? 640 : 800;
++  // Instagram-style 1:1: take the largest centered square out of the image.
++  const side = Math.min(sourceWidth, sourceHeight);
++  const sx = square ? Math.round((sourceWidth - side) / 2) : 0;
++  const sy = square ? Math.round((sourceHeight - side) / 2) : 0;
++  const cropW = square ? side : sourceWidth;
++  const cropH = square ? side : sourceHeight;
+   for (let attempt = 0; attempt < 6; attempt++) {
+-    const scale = Math.min(1, maxDim / Math.max(sourceWidth, sourceHeight));
+-    const w = Math.max(1, Math.round(sourceWidth * scale));
+-    const h = Math.max(1, Math.round(sourceHeight * scale));
++    const scale = Math.min(1, maxDim / Math.max(cropW, cropH));
++    const w = Math.max(1, Math.round(cropW * scale));
++    const h = Math.max(1, Math.round(cropH * scale));
+     const canvas = document.createElement("canvas");
+     canvas.width = w;
+     canvas.height = h;
+-    canvas.getContext("2d").drawImage(source, 0, 0, w, h);
++    canvas.getContext("2d").drawImage(source, sx, sy, cropW, cropH, 0, 0, w, h);
+ 
+     for (const quality of [0.82, 0.65, 0.5]) {
+       const dataUrl = canvas.toDataURL("image/jpeg", quality);
+@@ -119,6 +125,16 @@ function drawToConstrainedDataUrl(source, sourceWidth, sourceHeight, maxBytes =
+   return null;
+ }
+ 
++/** Center-crops an existing data URL to 1:1 (used for camera captures set as profile photo). */
++async function squareCropDataUrl(dataUrl) {
++  try {
++    const img = await loadImage(dataUrl);
++    return drawToConstrainedDataUrl(img, img.width, img.height, MAX_PHOTO_BYTES, true) || dataUrl;
++  } catch {
++    return dataUrl;
++  }
++}
++
+ function loadImage(src) {
+   return new Promise((resolve, reject) => {
+     const img = new Image();
+@@ -144,7 +160,7 @@ async function processPhotoFile(file) {
+       r.readAsDataURL(file);
+     });
+     const img = await loadImage(rawDataUrl);
+-    const constrained = drawToConstrainedDataUrl(img, img.width, img.height);
++    const constrained = drawToConstrainedDataUrl(img, img.width, img.height, MAX_PHOTO_BYTES, true);
+     if (!constrained) return { ok: false, reason: "Couldn't compress this image below 400KB — try a smaller photo." };
+     return { ok: true, dataUrl: constrained };
+   } catch {
+@@ -1452,6 +1468,90 @@ function TwoFactorSetup({ onVerified, onCancel }) {
+ }
+ 
+ 
++/* Turning two-step OFF needs a fresh emailed OTP, so a stolen open session
++   can't silently strip the protection. The server checks the code and
++   clears the flag; Firestore rules stop the client from doing it directly. */
++function TwoFactorDisable({ onDisabled, onCancel }) {
++  const [code, setCode] = useState("");
++  const [status, setStatus] = useState("Sending a 6-digit OTP to your account email…");
++  const [sending, setSending] = useState(true);
++  const [verifying, setVerifying] = useState(false);
++
++  useEffect(() => {
++    let alive = true;
++    sendEmailOtp("disable2fa")
++      .then(() => { if (alive) setStatus("We emailed you a 6-digit OTP. Enter it to turn off two-step verification."); })
++      .catch((err) => { if (alive) setStatus(err?.message || "Could not send the OTP."); })
++      .finally(() => { if (alive) setSending(false); });
++    return () => { alive = false; };
++  }, []);
++
++  const resend = async () => {
++    setSending(true);
++    try {
++      await sendEmailOtp("disable2fa");
++      setStatus("A new OTP was sent to your email.");
++    } catch (err) {
++      setStatus(err?.message || "Could not resend the OTP.");
++    } finally {
++      setSending(false);
++    }
++  };
++
++  const confirm = async () => {
++    if (!/^\d{6}$/.test(code)) {
++      setStatus("Enter the 6-digit OTP from your email.");
++      return;
++    }
++    setVerifying(true);
++    try {
++      await disableTwoFactorWithOtp(code);
++      onDisabled();
++    } catch (err) {
++      setStatus(err?.message || "Could not verify the OTP.");
++    } finally {
++      setVerifying(false);
++    }
++  };
++
++  const btn = { border: `1px solid ${C.border}`, color: C.ink, fontFamily: F, fontWeight: 600 };
++  return (
++    <div className="flex flex-col gap-3">
++      <div>
++        <p className="text-sm" style={{ color: C.ink, fontFamily: F, fontWeight: 600 }}>Confirm it's you to turn off two-step verification</p>
++        <p className="text-[12px] mt-1 max-w-sm" style={{ color: C.sub, fontFamily: F }}>
++          Your account will be less protected without it. We need a fresh code from your email first.
++        </p>
++      </div>
++      <p className="text-xs" style={{ color: C.sub, fontFamily: F }}>{status}</p>
++      <input
++        value={code}
++        onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
++        onKeyDown={(e) => e.key === "Enter" && confirm()}
++        inputMode="numeric"
++        autoComplete="one-time-code"
++        maxLength={6}
++        placeholder="Enter 6-digit OTP"
++        disabled={sending || verifying}
++        className="w-full max-w-xs text-center text-lg tracking-[0.3em] px-4 py-2 rounded-lg outline-none"
++        style={{ background: C.chip, color: C.ink, fontFamily: "monospace" }}
++      />
++      <div className="flex items-center gap-2 flex-wrap">
++        <button onClick={onCancel} disabled={verifying} className="text-xs px-3.5 py-2 rounded-full transition-colors hover:bg-[#F4F4F5]" style={btn}>Keep it on</button>
++        <button onClick={resend} disabled={sending || verifying} className="text-xs px-3.5 py-2 rounded-full transition-colors hover:bg-[#F4F4F5]" style={btn}>Resend OTP</button>
++        <button
++          onClick={confirm}
++          disabled={code.length !== 6 || verifying}
++          className="text-xs px-3.5 py-2 rounded-full text-white transition-opacity"
++          style={{ background: C.brick, fontFamily: F, fontWeight: 600, opacity: code.length === 6 && !verifying ? 1 : 0.4 }}
++        >
++          {verifying ? "Verifying…" : "Verify & turn off"}
++        </button>
++      </div>
++    </div>
++  );
++}
++
+ /* ---------------------------------------------------------------
+    Donation history
+ ------------------------------------------------------------------ */
+@@ -1460,10 +1560,35 @@ function TwoFactorSetup({ onVerified, onCancel }) {
+  * There is no in-app change flow — if a user makes a mistake, they 
+  * must email support with medical proof to get it changed.
+  */
+-function BloodTypePicker({ value, onSave }) {
+-  const [draft, setDraft] = useState(value || "");
++function BloodTypePicker({ value, onSave, unlocked = false, user }) {
++  const [draft, setDraft] = useState(unlocked ? "" : value || "");
++
++  // Opens a pre-filled Gmail compose window to the support inbox.
++  const openChangeRequestDraft = () => {
++    const body = [
++      "Hello RaktJaal team,",
++      "",
++      "I entered my blood group incorrectly and would like it unlocked so I can select the correct one.",
++      "",
++      `Name: ${user?.name || ""}`,
++      `Account email: ${user?.email || ""}`,
++      `Account ID: ${user?.uid || ""}`,
++      `Current (incorrect) blood group: ${value || ""}`,
++      "Correct blood group: ",
++      "",
++      "I have attached my medical proof (lab report / blood group card).",
++      "",
++      "Thank you.",
++    ].join("\n");
++    const url =
++      "https://mail.google.com/mail/?view=cm&fs=1" +
++      `&to=${encodeURIComponent("raktjaal@gmail.com")}` +
++      `&su=${encodeURIComponent("Blood Group Change Request")}` +
++      `&body=${encodeURIComponent(body)}`;
++    window.open(url, "_blank", "noopener,noreferrer");
++  };
+ 
+-  if (value) {
++  if (value && !unlocked) {
+     return (
+       <div>
+         <div className="flex items-center gap-2 mb-2.5">
+@@ -1477,16 +1602,17 @@ function BloodTypePicker({ value, onSave }) {
+           >
+             <Lock size={11} /> {value}
+           </span>
+-          <a
+-            href="mailto:support@raktjaal.com?subject=Blood%20Group%20Change%20Request"
++          <button
++            type="button"
++            onClick={openChangeRequestDraft}
+             className="text-xs transition-opacity hover:opacity-60 underline"
+             style={{ color: C.sub, fontFamily: F, fontWeight: 600 }}
+           >
+             Contact us to change
+-          </a>
++          </button>
+         </div>
+         <p className="text-[11px] mt-2 max-w-sm" style={{ color: C.faint, fontFamily: F }}>
+-          Locked permanently after saving since it's safety-critical for matching. If you entered this incorrectly, please mail us with medical proof to get it updated.
++          Locked permanently after saving since it's safety-critical for matching. If you entered this incorrectly, please mail us with medical proof to get it updated. The button opens a ready-made draft to raktjaal@gmail.com; once our team approves it, you'll be able to pick the correct group here.
+         </p>
+       </div>
+     );
+@@ -1577,16 +1703,7 @@ function DonationDetailModal({ entry, onClose }) {
+         {/* Header */}
+         <div className="flex items-start justify-between gap-3 px-5 pt-5 pb-4" style={{ borderBottom: `1px solid ${C.border}` }}>
+           <div className="flex items-center gap-3 min-w-0">
+-            <div
+-              className="rounded-full overflow-hidden flex items-center justify-center shrink-0"
+-              style={{ width: 52, height: 52, background: C.chip }}
+-            >
+-              {entry.counterpartPhoto ? (
+-                <img src={entry.counterpartPhoto} alt={entry.counterpartName || "Profile"} className="w-full h-full object-cover" />
+-              ) : (
+-                <span className="font-semibold" style={{ color: C.ink, fontFamily: F, fontSize: 18 }}>{initials}</span>
+-              )}
+-            </div>
++            <Avatar photo={entry.counterpartPhoto} initials={initials} size={52} />
+             <div className="min-w-0">
+               <p className="text-base font-bold truncate" style={{ color: C.ink, fontFamily: F }}>
+                 {entry.counterpartName || "Someone"}
+@@ -1788,19 +1905,6 @@ function DonationHistory({ donations }) {
+   );
+ }
+ 
+-function nextEligibleText(donations) {
+-  const donated = (donations || []).filter((d) => d.role === "donor");
+-  if (donated.length === 0) return "You're eligible to donate right now.";
+-  const last = donated.reduce((latest, d) => ((d.verifiedAt || 0) > (latest.verifiedAt || 0) ? d : latest), donated[0]);
+-  if (!last?.verifiedAt) return "You're eligible to donate right now.";
+-  const lastDate = new Date(last.verifiedAt);
+-  if (isNaN(lastDate.getTime())) return "You're eligible to donate right now.";
+-  const nextDate = new Date(lastDate);
+-  nextDate.setDate(nextDate.getDate() + 90);
+-  if (nextDate <= new Date()) return "You're eligible to donate right now.";
+-  return `Eligible again from ${nextDate.toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" })}.`;
+-}
+-
+ /**
+  * Camera-based identity capture. Important honesty note baked into the UI
+  * copy itself: this captures a photo into the browser's local storage only.
+@@ -2195,6 +2299,7 @@ export default function ProfilePage() {
+   const [editingKey, setEditingKey] = useState(null); // "name" | "email" | "phone" | "address" | "addEmail"
+   const [confirmDelete, setConfirmDelete] = useState(false);
+   const [settingUpTwoFactor, setSettingUpTwoFactor] = useState(false);
++  const [disablingTwoFactor, setDisablingTwoFactor] = useState(false);
+   // hasPasswordProvider(authUser) only reflects reality once Firebase's
+   // onAuthStateChanged fires again, which linkWithCredential does NOT
+   // trigger — so this local flag covers the gap right after setting one.
+@@ -2270,6 +2375,26 @@ export default function ProfilePage() {
+   };
+ 
+ 
++  // Sets the blood type and re-locks it in one write (an admin unlock only allows one change).
++  const saveBloodType = (bt) => {
++    const previous = user?.bloodType;
++    setUser({ ...user, bloodType: bt, bloodTypeUnlocked: false });
++    flashSaved();
++    updateUserProfile(authUser.uid, { bloodType: bt, bloodTypeUnlocked: false }).catch(() => {});
++    if (bt && bt !== previous) {
++      authUser
++        .getIdToken()
++        .then((token) =>
++          fetch("/api/email/blood-type-changed", {
++            method: "POST",
++            headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
++            body: JSON.stringify({ oldType: previous || null, newType: bt }),
++          })
++        )
++        .catch(() => {});
++    }
++  };
++
+   const saveAddress = (addr) => {
+     updateField("address", addr);
+     setEditingKey(null);
+@@ -2673,7 +2798,7 @@ export default function ProfilePage() {
+               {/* Donor details row */}
+               <Row label="Donor details">
+                 <div className="flex flex-col gap-4">
+-                  <BloodTypePicker value={user.bloodType} onSave={(bt) => updateField("bloodType", bt)} />
++                  <BloodTypePicker value={user.bloodType} unlocked={Boolean(user.bloodTypeUnlocked)} user={user} onSave={saveBloodType} />
+ 
+                   <RowItem
+                     left={
+@@ -2703,9 +2828,6 @@ export default function ProfilePage() {
+               {/* Donation history row */}
+               <div id="donation-history">
+                 <Row label="Donation history" isLast>
+-                  <p className="text-xs mb-2.5" style={{ color: C.sub, fontFamily: F }}>
+-                    {nextEligibleText(user.donations)}
+-                  </p>
+                   <DonationHistory donations={user.donations} />
+                 </Row>
+               </div>
+@@ -2735,7 +2857,17 @@ export default function ProfilePage() {
+ 
+               {/* Two-step verification */}
+               <Row label="Two-step verification">
+-                {user.twoFactorEnabled ? (
++                {user.twoFactorEnabled && disablingTwoFactor ? (
++                  <TwoFactorDisable
++                    onDisabled={() => {
++                      // Server already cleared the flag after checking the OTP; just mirror it locally.
++                      setUser({ ...user, twoFactorEnabled: false });
++                      setDisablingTwoFactor(false);
++                      flashSaved();
++                    }}
++                    onCancel={() => setDisablingTwoFactor(false)}
++                  />
++                ) : user.twoFactorEnabled ? (
+                   <RowItem
+                     left={
+                       <div className="flex items-center gap-2">
+@@ -2745,7 +2877,7 @@ export default function ProfilePage() {
+                         </span>
+                       </div>
+                     }
+-                    right={<KebabMenu items={[{ label: "Turn off", danger: true, onClick: () => updateField("twoFactorEnabled", false) }]} />}
++                    right={<KebabMenu items={[{ label: "Turn off", danger: true, onClick: () => setDisablingTwoFactor(true) }]} />}
+                   />
+                 ) : settingUpTwoFactor ? (
+                   <TwoFactorSetup
+@@ -2794,7 +2926,7 @@ export default function ProfilePage() {
+                   hasPhoto={Boolean(user.identityPhoto)}
+                   onSave={(dataUrl) => updateField("identityPhoto", dataUrl)}
+                   onRemove={() => updateField("identityPhoto", null)}
+-                  onAlsoSetProfilePhoto={(dataUrl) => updateField("profilePhoto", dataUrl)}
++                  onAlsoSetProfilePhoto={async (dataUrl) => updateField("profilePhoto", await squareCropDataUrl(dataUrl))}
+                 />
+               </Row>
+ 
+diff --git a/src/backend/lib/auth.ts b/src/backend/lib/auth.ts
+index baa7fa5..69979e3 100644
+--- a/src/backend/lib/auth.ts
++++ b/src/backend/lib/auth.ts
+@@ -121,7 +121,7 @@ export async function signInWithEmail(
+   }
+ }
+ 
+-export async function sendEmailOtp(purpose: "registration" | "delete" | "twofactor"): Promise<void> {
++export async function sendEmailOtp(purpose: "registration" | "delete" | "twofactor" | "disable2fa"): Promise<void> {
+   if (!auth.currentUser) throw new Error("No signed-in account found.");
+   const token = await auth.currentUser.getIdToken(true);
+   const response = await fetch("/api/email-otp/send", {
+@@ -145,6 +145,19 @@ export async function verifyEmailOtpCode(code: string, purpose: "registration" |
+   if (!response.ok) throw new Error(data.error || "Could not verify the email OTP.");
+ }
+ 
++/** Turns two-step verification off; the server checks the emailed OTP first. */
++export async function disableTwoFactorWithOtp(code: string): Promise<void> {
++  if (!auth.currentUser) throw new Error("No signed-in account found.");
++  const token = await auth.currentUser.getIdToken(true);
++  const response = await fetch("/api/account/disable-2fa", {
++    method: "POST",
++    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
++    body: JSON.stringify({ code }),
++  });
++  const data = await response.json().catch(() => ({}));
++  if (!response.ok) throw new Error(data.error || "Could not turn off two-step verification.");
++}
++
+ export async function deleteAccountWithEmailOtp(code: string): Promise<void> {
+   if (!auth.currentUser) throw new Error("No signed-in account found.");
+   const token = await auth.currentUser.getIdToken(true);
+@@ -230,7 +243,13 @@ export async function changeAccountPassword(currentPassword: string, newPassword
+   try {
+     const credential = EmailAuthProvider.credential(user.email, currentPassword);
+     await reauthenticateWithCredential(user, credential);
++    // Grab a token while the session is known-good; used for the notice below.
++    const token = await user.getIdToken().catch(() => null);
+     await updatePassword(user, newPassword);
++    // Security notice by email (best-effort, never fails the change).
++    if (token) {
++      fetch("/api/email/password-changed", { method: "POST", headers: { Authorization: `Bearer ${token}` } }).catch(() => {});
++    }
+   } catch (err) {
+     throw new Error(friendlyAuthError(err));
+   }
+diff --git a/src/backend/lib/emailOtp.ts b/src/backend/lib/emailOtp.ts
+index b8b309e..c3cbaf8 100644
+--- a/src/backend/lib/emailOtp.ts
++++ b/src/backend/lib/emailOtp.ts
+@@ -14,7 +14,7 @@ function generateOtp() {
+   return crypto.randomInt(100000, 1000000).toString();
+ }
+ 
+-export type EmailOtpPurpose = "registration" | "delete" | "twofactor";
++export type EmailOtpPurpose = "registration" | "delete" | "twofactor" | "disable2fa";
+ 
+ export async function createEmailOtp(uid: string, email: string, purpose: EmailOtpPurpose) {
+   const ref = adminDb.collection("emailOtps").doc(`${purpose}_${uid}`);
+diff --git a/src/backend/lib/emailTemplates.ts b/src/backend/lib/emailTemplates.ts
+index d517308..6e85d55 100644
+--- a/src/backend/lib/emailTemplates.ts
++++ b/src/backend/lib/emailTemplates.ts
+@@ -149,11 +149,12 @@ export function accountDeletedEmail(o: { name: string }) {
+ 
+ /* ================= 3. 2FA OTP ================= */
+ 
+-export type OtpPurpose = "registration" | "delete" | "twofactor";
++export type OtpPurpose = "registration" | "delete" | "twofactor" | "disable2fa";
+ 
+ const OTP_COPY: Record<OtpPurpose, { subject: string; heading: string; lead: string }> = {
+   registration: { subject: "is your RaktJaal verification code", heading: "Verify your email", lead: "Enter this code to verify your email address." },
+   twofactor: { subject: "is your RaktJaal two-step code", heading: "Two-step verification", lead: "Enter this code to finish signing in." },
++  disable2fa: { subject: "is your code to turn off two-step verification", heading: "Turn off two-step?", lead: "Enter this code to confirm you want to turn off two-step verification. If this wasn't you, don't share it — change your password instead." },
+   delete: { subject: "is your RaktJaal deletion code", heading: "Confirm account deletion", lead: "Enter this code to permanently delete your account." },
+ };
+ 
+@@ -272,6 +273,26 @@ export function bloodTypeChangedEmail(o: { name: string; oldType: string; newTyp
+   };
+ }
+ 
++/* ================= Password changed ================= */
++
++export function passwordChangedEmail(o: { name: string; time: string }) {
++  const url = appUrl() || "#";
++  return {
++    subject: "Your RaktJaal password was changed",
++    text: `Hi ${o.name}, the password on your RaktJaal account was changed on ${o.time}. If this wasn't you, reset your password immediately: ${url}/login`,
++    html: shell({
++      hero: "security",
++      heading: "Password changed",
++      body:
++        p(`Hi ${esc(o.name)}, the password on your RaktJaal account was just changed.`) +
++        p(`<span style="font-size:12px;color:${MUTED};">${esc(o.time)}. If this was you, no action is needed. If not, reset your password right away and turn on two-step verification.</span>`),
++      ctaLabel: "Secure my account",
++      ctaHref: `${url}/profile`,
++      preheader: "Your RaktJaal password was changed.",
++    }),
++  };
++}
++
+ /* ================= 8. New sign-in device / location ================= */
+ 
+ export function newSignInEmail(o: { name: string; device: string; location: string; time: string }) {
+diff --git a/src/backend/lib/requests.ts b/src/backend/lib/requests.ts
+index e49f61a..49fe1bf 100644
+--- a/src/backend/lib/requests.ts
++++ b/src/backend/lib/requests.ts
+@@ -314,6 +314,8 @@ export async function createDonationRequest(input: CreateRequestInput): Promise<
+     tone: "info",
+     read: false,
+     createdAt: now,
++    kind: "incoming-request",
++    requestId: id,
+   } satisfies Omit<AppNotification, "id">);
+   await batch.commit();
+ 
+@@ -428,6 +430,8 @@ export async function createOpenRequest(input: CreateOpenRequestInput): Promise<
+       tone: "info",
+       read: false,
+       createdAt: now,
++      kind: "open-request",
++      requestId: id,
+     } satisfies Omit<AppNotification, "id">);
+   }
+   await batch.commit();
+@@ -475,6 +479,9 @@ export async function acceptOpenRequest(
+     tone: "success",
+     read: false,
+     createdAt: now,
++    kind: "thread",
++    requestId: req.id,
++    threadId,
+   } satisfies Omit<AppNotification, "id">);
+ 
+   try {
+@@ -611,6 +618,9 @@ export async function approveRequest(req: DonationRequest): Promise<void> {
+     tone: "success",
+     read: false,
+     createdAt: now,
++    kind: "thread",
++    requestId: req.id,
++    threadId,
+   } satisfies Omit<AppNotification, "id">);
+   await batch.commit();
+ 
+@@ -636,6 +646,8 @@ export async function declineRequest(req: DonationRequest): Promise<void> {
+     tone: "info",
+     read: false,
+     createdAt: now,
++    kind: "sent-update",
++    requestId: req.id,
+   } satisfies Omit<AppNotification, "id">);
+   await batch.commit();
+ }
+@@ -657,6 +669,8 @@ export async function reopenRequest(req: DonationRequest): Promise<void> {
+       tone: "info",
+       read: false,
+       createdAt: now,
++      kind: "incoming-request",
++      requestId: req.id,
+     } satisfies Omit<AppNotification, "id">);
+   }
+   await batch.commit();
+@@ -861,6 +875,38 @@ export async function markAllNotificationsRead(uid: string, rows: AppNotificatio
+   await batch.commit();
+ }
+ 
++export async function markNotificationRead(id: string) {
++  await updateDoc(doc(db, "notifications", id), { read: true });
++}
++
++/** One request by id (pending requests are readable by any signed-in user). */
++export async function getRequestById(id: string): Promise<DonationRequest | null> {
++  const snap = await getDoc(doc(db, "requests", id));
++  return snap.exists() ? ({ id: snap.id, ...snap.data() } as DonationRequest) : null;
++}
++
++/**
++ * Keeps this user's avatar in their chat threads current. Threads store a
++ * snapshot of each participant's photo, so after a profile-photo change the
++ * old one would show in the inbox forever. Best-effort and idempotent: only
++ * writes threads whose stored photo differs from the current one.
++ */
++export async function syncMyThreadPhotos(
++  threads: ChatThread[],
++  uid: string,
++  photo: string | null | undefined
++): Promise<void> {
++  const target = safePhoto(photo);
++  const stale = threads.filter((t) => t.participants.includes(uid) && (t.photos?.[uid] ?? null) !== target);
++  await Promise.all(
++    stale.map((t) =>
++      updateDoc(doc(db, "threads", t.id), { [`photos.${uid}`]: target }).catch((e) =>
++        console.warn("Could not refresh thread photo:", e)
++      )
++    )
++  );
++}
++
+ /** Small helper so UI can show "5 min ago" instead of a raw timestamp. */
+ export function timeAgo(ts: number): string {
+   const s = Math.max(0, Math.round((Date.now() - ts) / 1000));
+diff --git a/src/backend/types/index.ts b/src/backend/types/index.ts
+index b4414af..4ce9409 100644
+--- a/src/backend/types/index.ts
++++ b/src/backend/types/index.ts
+@@ -158,6 +158,10 @@ export interface AppNotification {
+   tone: "info" | "success";
+   read: boolean;
+   createdAt: number;
++  /** What tapping the notification does (optional: older ones just aren't actionable). */
++  kind?: "incoming-request" | "open-request" | "thread" | "sent-update" | "confirm-donation" | "history" | "profile";
++  requestId?: string;
++  threadId?: string;
+ }
+ 
+ /** Contact details released only to the counter-party of an approved request. */
+diff --git a/src/frontend/hooks/useRequestsBackend.ts b/src/frontend/hooks/useRequestsBackend.ts
+index d63f1a7..952cc88 100644
+--- a/src/frontend/hooks/useRequestsBackend.ts
++++ b/src/frontend/hooks/useRequestsBackend.ts
+@@ -8,6 +8,8 @@ import {
+   cancelRequest,
+   reopenRequest,
+   markAllNotificationsRead,
++  markNotificationRead,
++  syncMyThreadPhotos,
+   markThreadRead,
+   sendMessage,
+   subscribeIncomingRequests,
+@@ -138,6 +140,13 @@ export function useRequestsBackend(profile: ProfileLike | null, profileComplete:
+     return () => unsubs.forEach((u) => u());
+   }, [uid]);
+ 
++  // Profile photo changed -> refresh my avatar inside every existing chat thread.
++  const myPhoto = profile?.profilePhoto ?? null;
++  useEffect(() => {
++    if (!uid || threads.length === 0) return;
++    syncMyThreadPhotos(threads, uid, myPhoto).catch(() => {});
++  }, [uid, myPhoto, threads]);
++
+   const threadById = useMemo(() => new Map(threads.map((t) => [t.id, t])), [threads]);
+ 
+   const approve = useCallback((req: DonationRequest) => approveRequest(req), []);
+@@ -191,5 +200,6 @@ export function useRequestsBackend(profile: ProfileLike | null, profileComplete:
+     send,
+     markRead,
+     markAllRead,
++    markOneRead: markNotificationRead,
+   };
+ }

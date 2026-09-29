@@ -119,6 +119,8 @@ export async function POST(request: Request) {
             tone: "info",
             read: false,
             createdAt: now,
+            kind: "confirm-donation",
+            requestId: req.id,
           });
         }
         return {
@@ -225,6 +227,7 @@ export async function POST(request: Request) {
         tone: "success",
         read: false,
         createdAt: now2,
+        kind: "history",
       });
       batch.set(adminDb.collection("notifications").doc(), {
         uid: req.requesterUid,
@@ -233,6 +236,7 @@ export async function POST(request: Request) {
         tone: "success",
         read: false,
         createdAt: now2,
+        kind: "history",
       });
       await batch.commit();
     } catch (e) {
