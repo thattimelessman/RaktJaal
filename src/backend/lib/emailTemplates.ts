@@ -4,11 +4,10 @@
  * serif heading, illustrated hero panel, centered body copy, dark pill CTA,
  * light footer with unsubscribe-style legal line.
  *
- * Assets referenced:
- *   {APP_URL}/email/logo.png              72x72  — drop-in-grey-circle mark
- *   {APP_URL}/email/hero/<name>.png        608x404 — per-email illustration panel
- * Export the PNGs from /mnt/user-data/outputs/emails/ (logo + hero/*.png) into
- * your Next.js public/email/ folder so these URLs resolve in production.
+ * Images (public/email/logo.png and hero/*.png) are NOT loaded from a URL. They are
+ * embedded in each message as inline cid: attachments — see emailAssets.ts (generated
+ * by scripts/gen-email-assets.mjs) and the hook in mailer.ts. Re-run that script after
+ * editing any of those PNGs.
  *
  * Usage:
  *   import { otpEmail } from "@/backend/lib/emailTemplates";
@@ -20,6 +19,13 @@ const INK = "#111111";
 const MUTED = "#767676";
 const PAGE_BG = "#F3F3F3";
 
+// Heading typeface. Email clients can't load web fonts reliably (Gmail ignores
+// @font-face), so this is a system stack: refined serif where available, sane fallbacks.
+// To try a modern sans instead, use:
+//   "-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif"  with weight 700
+const HEADING_FONT = "Georgia,'Iowan Old Style','Palatino Linotype',Palatino,'Times New Roman',serif";
+const HEADING_WEIGHT = 400;
+
 const esc = (s: unknown) =>
   String(s ?? "")
     .replace(/&/g, "&amp;")
@@ -28,7 +34,6 @@ const esc = (s: unknown) =>
     .replace(/"/g, "&quot;");
 
 const appUrl = () => (process.env.NEXT_PUBLIC_APP_URL || "").replace(/\/$/, "");
-const asset = (path: string) => `${appUrl()}${path}`;
 
 /* ---------- shell ---------- */
 
@@ -65,17 +70,17 @@ function shell(opts: {
 
     <tr><td align="center" style="padding:36px 24px 22px;">
       <table role="presentation" cellspacing="0" cellpadding="0"><tr>
-        <td style="padding-right:9px;"><img src="${asset("/email/logo.png")}" width="30" height="30" alt="" style="display:block;border:0;border-radius:50%;width:30px;height:30px;"/></td>
+        <td style="padding-right:9px;"><img src="cid:rj-logo" width="30" height="30" alt="" style="display:block;border:0;border-radius:50%;width:30px;height:30px;"/></td>
         <td style="font-family:Georgia,'Times New Roman',serif;font-size:19px;font-weight:700;color:${INK};letter-spacing:0.2px;">RaktJaal</td>
       </tr></table>
     </td></tr>
 
-    <tr><td align="center" style="padding:0 28px 26px;font-family:Georgia,'Times New Roman',serif;font-size:29px;line-height:1.3;font-weight:700;color:${INK};">
+    <tr><td align="center" style="padding:0 28px 26px;font-family:${HEADING_FONT};font-size:32px;line-height:1.2;font-weight:${HEADING_WEIGHT};letter-spacing:-0.6px;color:${INK};">
       ${opts.heading}
     </td></tr>
 
     <tr><td align="center" style="padding:0 22px;">
-      <img src="${asset(`/email/hero/${opts.hero}.png`)}" width="516" alt=""
+      <img src="cid:rj-hero-${opts.hero}" width="516" alt=""
         style="display:block;border:0;width:100%;max-width:516px;height:auto;border-radius:18px;"/>
     </td></tr>
 
@@ -164,6 +169,7 @@ export function otpEmail(o: { code: string; purpose: OtpPurpose; ip?: string; lo
       heading: c.heading,
       body:
         p(c.lead) +
+        `<div style="margin:6px 0 22px;"><span style="display:inline-block;background:${PAGE_BG};border-radius:14px;padding:16px 26px 16px 34px;font-family:'SF Mono',Menlo,Consolas,'Courier New',monospace;font-size:34px;line-height:1;font-weight:700;letter-spacing:8px;color:${INK};">${esc(o.code)}</span></div>` +
         p(`<span style="font-size:12px;color:${MUTED};">Requested from ${origin}. Didn't request this? You can safely ignore this email — the code expires in 10 minutes.</span>`),
       preheader: `${o.code} ${c.subject}`,
     }),
