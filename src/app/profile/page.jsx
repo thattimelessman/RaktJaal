@@ -2557,6 +2557,7 @@ export default function ProfilePage() {
   const router = useRouter();
   const { user: authUser, loading: authLoading, refreshUser } = useAuth();  const [user, setUser] = useState(null);
   const [profileLoading, setProfileLoading] = useState(true);
+  const [loggingOut, setLoggingOut] = useState(false);
   const [tab, setTab] = useState("profile"); // "profile" | "security"
   const [savedFlash, setSavedFlash] = useState(false);
   const [editingKey, setEditingKey] = useState(null); // "name" | "email" | "phone" | "address" | "addEmail"
@@ -2632,7 +2633,8 @@ export default function ProfilePage() {
     );
   }
 
-  if (!user) return <SignedOut />;
+  if (loggingOut) return null;
+  if (!user || !authUser) return <SignedOut />;
 
   const missing = missingFields(user);
   const address = normalizeAddress(user);
@@ -2733,8 +2735,11 @@ export default function ProfilePage() {
   };
 
   const handleLogout = async () => {
-    await signOutUser();
+    // Flag first so the page stops rendering profile UI the instant auth clears,
+    // instead of crashing on a null auth user for one render.
+    setLoggingOut(true);
     router.push("/login");
+    await signOutUser();
   };
 
   const handleDeleteAccount = async () => {
@@ -3133,7 +3138,7 @@ export default function ProfilePage() {
               {/* Donation history row */}
               <div id="donation-history">
                 <Row label="Donation History & My Requests" isLast>
-                  <DonationHistory donations={user.donations} myUid={authUser.uid} />
+                  <DonationHistory donations={user.donations} myUid={authUser?.uid} />
                 </Row>
               </div>
             </div>
