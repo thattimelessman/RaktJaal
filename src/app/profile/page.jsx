@@ -2034,17 +2034,8 @@ function MyRequestDetailModal({ r, onClose }) {
   );
 }
 
-function MyRequests({ myUid }) {
-  const [rows, setRows] = useState([]);
+function MyRequests({ rows }) {
   const [openId, setOpenId] = useState(null);
-
-  useEffect(() => {
-    if (!myUid) return;
-    const unsub = subscribeSentRequests(myUid, (list) =>
-      setRows([...list].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)))
-    );
-    return () => unsub && unsub();
-  }, [myUid]);
 
   const active = rows.find((r) => r.id === openId) || null;
 
@@ -2101,6 +2092,15 @@ function MyRequests({ myUid }) {
 
 function DonationHistory({ donations, myUid }) {
   const [tab, setTab] = useState("donated"); // "donated" | "received" | "requests"
+  const [myRows, setMyRows] = useState([]);
+
+  useEffect(() => {
+    if (!myUid) return;
+    const unsub = subscribeSentRequests(myUid, (list) =>
+      setMyRows([...list].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)))
+    );
+    return () => unsub && unsub();
+  }, [myUid]);
 
   const donated = (donations || []).filter((d) => d.role === "donor").sort((a, b) => (b.verifiedAt || 0) - (a.verifiedAt || 0));
   const received = (donations || []).filter((d) => d.role === "requester").sort((a, b) => (b.verifiedAt || 0) - (a.verifiedAt || 0));
@@ -2143,12 +2143,12 @@ function DonationHistory({ donations, myUid }) {
             fontWeight: 700,
           }}
         >
-          My requests
+          My requests ({myRows.length})
         </button>
       </div>
 
       {tab === "requests" ? (
-        <MyRequests myUid={myUid} />
+        <MyRequests rows={myRows} />
       ) : rows.length === 0 ? (
         <div className="rounded-xl p-5 text-center" style={{ background: C.hover, border: `1px dashed ${C.border}` }}>
           <p className="text-sm" style={{ color: C.sub, fontFamily: F }}>
@@ -2562,6 +2562,7 @@ export default function ProfilePage() {
   const [savedFlash, setSavedFlash] = useState(false);
   const [editingKey, setEditingKey] = useState(null); // "name" | "email" | "phone" | "address" | "addEmail"
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [leavePrompt, setLeavePrompt] = useState(false);
   const [settingUpTwoFactor, setSettingUpTwoFactor] = useState(false);
   const [disablingTwoFactor, setDisablingTwoFactor] = useState(false);
   // hasPasswordProvider(authUser) only reflects reality once Firebase's
@@ -3137,7 +3138,7 @@ export default function ProfilePage() {
 
               {/* Donation history row */}
               <div id="donation-history">
-                <Row label="Donation History & My Requests" isLast>
+                <Row label={<>Donation History<br />&amp; My Requests</>} isLast>
                   <DonationHistory donations={user.donations} myUid={authUser?.uid} />
                 </Row>
               </div>
@@ -3250,13 +3251,50 @@ export default function ProfilePage() {
                       </span>
                     }
                     right={
-                      <button onClick={() => setConfirmDelete(true)} className="flex items-center gap-1.5 text-sm transition-opacity hover:opacity-60" style={{ color: C.brickDark, fontFamily: F, fontWeight: 600 }}>
+                      <button onClick={() => setLeavePrompt(true)} className="flex items-center gap-1.5 text-sm transition-opacity hover:opacity-60" style={{ color: C.brickDark, fontFamily: F, fontWeight: 600 }}>
                         <Trash2 size={13} /> Delete
                       </button>
                     }
                   />
                 ) : (
                   <CodeConfirmDelete onConfirm={handleDeleteAccount} onCancel={() => setConfirmDelete(false)} />
+                )}
+                {leavePrompt && (
+                  <div
+                    className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
+                    style={{ background: "rgba(0,0,0,0.5)", backdropFilter: "blur(3px)" }}
+                    onClick={() => setLeavePrompt(false)}
+                  >
+                    <div
+                      className="w-full max-w-sm rounded-2xl shadow-2xl p-6 text-center"
+                      style={{ background: C.paper, animation: "modalIn 0.16s ease-out forwards" }}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <div className="w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-3" style={{ background: C.blush }}>
+                        <Trash2 size={20} color={C.brickDark} />
+                      </div>
+                      <p className="text-base font-bold" style={{ color: C.ink, fontFamily: F }}>Do you want to leave us?</p>
+                      <p className="text-xs mt-1.5" style={{ color: C.sub, fontFamily: F }}>
+                        Your profile and donation history will be permanently removed.
+                      </p>
+                      <div className="flex flex-col gap-2 mt-5">
+                        <button
+                          onClick={() => { setLeavePrompt(false); setConfirmDelete(true); }}
+                          className="w-full text-sm py-2.5 rounded-full text-white transition-opacity hover:opacity-90"
+                          style={{ background: C.brick, fontFamily: F, fontWeight: 700 }}
+                        >
+                          Yes, proceed
+                        </button>
+                        <button
+                          onClick={() => setLeavePrompt(false)}
+                          className="w-full text-sm py-2.5 rounded-full transition-colors hover:bg-[#F4F4F5]"
+                          style={{ border: `1px solid ${C.border}`, color: C.ink, fontFamily: F, fontWeight: 700 }}
+                        >
+                          No, I'll stay
+                        </button>
+                      </div>
+                    </div>
+                  </div>
                 )}
               </Row>
             </div>
