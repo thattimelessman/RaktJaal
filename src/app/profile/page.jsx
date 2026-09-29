@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { createPortal } from "react-dom";
 import { useAuth } from "@/frontend/hooks/useAuth";
 import { signOutUser, sendEmailOtp, verifyEmailOtpCode, deleteAccountWithEmailOtp, hasPasswordProvider, setPasswordForGoogleAccount, changeAccountPassword, disableTwoFactorWithOtp } from "@/backend/lib/auth";
 import { getUserProfile, updateUserProfile } from "@/backend/lib/userProfile";
@@ -508,28 +509,46 @@ function Avatar({ photo: photoProp, uid, initials, size = 40 }) {
         )}
       </div>
 
-      {/* 2. The social-media style full-screen overlay */}
-      {expanded && photo && (
-        <div 
-          className="fixed inset-0 z-[9999] flex items-center justify-center p-4 sm:p-10"
-          style={{ background: "rgba(0,0,0,0.85)", backdropFilter: "blur(5px)" }}
-          onClick={() => setExpanded(false)}
-        >
-          <img 
-            src={photo} 
-            alt="Expanded profile" 
-            className="rounded-2xl shadow-2xl transition-transform"
-            style={{
-              width: "min(88vw, 88vh, 560px)",
-              height: "min(88vw, 88vh, 560px)",
-              objectFit: "cover",
-              animation: "scale-up 0.2s ease-out forwards",
-            }}
-            onClick={(e) => e.stopPropagation()} // Stops the image click from closing it
-          />
-          <style>{`@keyframes scale-up { from { transform: scale(0.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }`}</style>
-        </div>
-      )}
+      {/* 2. Photo popup. Rendered in a portal on <body> so it floats above any
+             window it was opened from (donation log, request detail) instead of
+             being embedded inside it. Square 1:1, soft backdrop, no black bars. */}
+      {expanded && photo && typeof document !== "undefined" &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-[10000] flex items-center justify-center p-6"
+            style={{ background: "rgba(20,20,24,0.28)", backdropFilter: "blur(6px)" }}
+            onClick={(e) => { e.stopPropagation(); setExpanded(false); }}
+          >
+            <div
+              className="relative bg-white shadow-2xl"
+              style={{
+                width: "min(86vw, 86vh, 420px)",
+                aspectRatio: "1 / 1",
+                borderRadius: 28,
+                padding: 8,
+                animation: "rkPhotoPop 0.22s cubic-bezier(.2,.9,.3,1.2) forwards",
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <img
+                src={photo}
+                alt="Profile photo"
+                className="block w-full h-full object-cover"
+                style={{ borderRadius: 21 }}
+              />
+              <button
+                onClick={() => setExpanded(false)}
+                aria-label="Close photo"
+                className="absolute flex items-center justify-center rounded-full bg-white shadow-md hover:bg-[#F4F4F5]"
+                style={{ top: -12, right: -12, width: 30, height: 30 }}
+              >
+                <X size={15} color={C.ink} />
+              </button>
+            </div>
+            <style>{`@keyframes rkPhotoPop { from { transform: scale(0.85); opacity: 0; } to { transform: scale(1); opacity: 1; } }`}</style>
+          </div>,
+          document.body
+        )}
     </>
   );
 }
@@ -1953,7 +1972,7 @@ function MyRequestDetailModal({ r, onClose }) {
             <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold" style={{ background: C.blush, color: C.brickDark, fontFamily: F }}>
               <Droplet size={12} /> {r.bloodType}
             </span>
-            <span className="px-3 py-1.5 rounded-full text-xs font-bold" style={{ background: C.chip, color: C.ink, fontFamily: F }}>
+            <span className="px-3 py-1.5 rounded-full text-xs font-bold text-white" style={{ background: C.brick, fontFamily: F }}>
               {r.units} unit{r.units > 1 ? "s" : ""}
             </span>
             {r.urgent && (
@@ -2058,14 +2077,19 @@ function MyRequests({ myUid }) {
                 </div>
                 <div className="min-w-0">
                   <div className="text-sm truncate" style={{ color: C.ink, fontFamily: F, fontWeight: 600 }}>
-                    {r.bloodType} · {r.units} unit{r.units > 1 ? "s" : ""}{r.hospital ? ` · ${r.hospital}` : ""}
+                    {r.bloodType}{r.hospital ? ` · ${r.hospital}` : ""}
                   </div>
                   <div className="text-xs mt-0.5 truncate" style={{ color: C.sub, fontFamily: F }}>{when}</div>
                 </div>
               </div>
-              <span className="px-2.5 py-1 rounded-full text-xs shrink-0" style={{ background: st.bg, color: st.color, fontFamily: F, fontWeight: 700 }}>
-                {st.label}
-              </span>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <span className="px-2.5 py-1 rounded-full text-xs text-white" style={{ background: C.brick, fontFamily: F, fontWeight: 600 }}>
+                  {r.units} unit{r.units > 1 ? "s" : ""}
+                </span>
+                <span className="px-2.5 py-1 rounded-full text-xs" style={{ background: st.bg, color: st.color, fontFamily: F, fontWeight: 700 }}>
+                  {st.label}
+                </span>
+              </div>
             </button>
           );
         })}
@@ -2075,12 +2099,12 @@ function MyRequests({ myUid }) {
   );
 }
 
-function DonationHistory({ donations }) {
-  const [tab, setTab] = useState("donated"); // "donated" | "received"
+function DonationHistory({ donations, myUid }) {
+  const [tab, setTab] = useState("donated"); // "donated" | "received" | "requests"
 
   const donated = (donations || []).filter((d) => d.role === "donor").sort((a, b) => (b.verifiedAt || 0) - (a.verifiedAt || 0));
   const received = (donations || []).filter((d) => d.role === "requester").sort((a, b) => (b.verifiedAt || 0) - (a.verifiedAt || 0));
-  const rows = tab === "donated" ? donated : received;
+  const rows = tab === "received" ? received : donated;
 
   return (
     <div className="flex flex-col gap-3">
@@ -2109,9 +2133,23 @@ function DonationHistory({ donations }) {
         >
           Received ({received.length})
         </button>
+        <button
+          onClick={() => setTab("requests")}
+          className="text-xs px-3 py-1.5 rounded-full transition-colors"
+          style={{
+            background: tab === "requests" ? C.ink : C.chip,
+            color: tab === "requests" ? "#fff" : C.sub,
+            fontFamily: F,
+            fontWeight: 700,
+          }}
+        >
+          My requests
+        </button>
       </div>
 
-      {rows.length === 0 ? (
+      {tab === "requests" ? (
+        <MyRequests myUid={myUid} />
+      ) : rows.length === 0 ? (
         <div className="rounded-xl p-5 text-center" style={{ background: C.hover, border: `1px dashed ${C.border}` }}>
           <p className="text-sm" style={{ color: C.sub, fontFamily: F }}>
             {tab === "donated"
@@ -3094,15 +3132,8 @@ export default function ProfilePage() {
 
               {/* Donation history row */}
               <div id="donation-history">
-                <Row label="Donation history">
-                  <DonationHistory donations={user.donations} />
-                </Row>
-              </div>
-
-              {/* Every request this person has made, in its own section */}
-              <div id="my-requests">
-                <Row label="My requests" isLast>
-                  <MyRequests myUid={authUser.uid} />
+                <Row label="Donation History & My Requests" isLast>
+                  <DonationHistory donations={user.donations} myUid={authUser.uid} />
                 </Row>
               </div>
             </div>

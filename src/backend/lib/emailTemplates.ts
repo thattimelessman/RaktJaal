@@ -114,19 +114,97 @@ const b = (t: string) => `<b style="color:${INK};">${esc(t)}</b>`;
 
 export function welcomeEmail(o: { name: string }) {
   const url = appUrl() || "#";
+  const first = esc((o.name || "there").trim().split(/\s+/)[0]);
+  const SANS = "-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif";
+  const year = new Date().getFullYear();
+
+  const step = (n: string, title: string, copy: string) => `
+    <tr><td style="padding:0 0 18px;">
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr>
+        <td width="46" valign="top"><div style="width:36px;height:36px;line-height:36px;border-radius:50%;background:${RED};color:#fff;text-align:center;font:700 15px ${SANS};">${n}</div></td>
+        <td valign="top" style="font-family:${SANS};">
+          <div style="font-size:16px;font-weight:700;color:${INK};padding-bottom:3px;">${title}</div>
+          <div style="font-size:14px;line-height:1.6;color:#4a4a4a;">${copy}</div>
+        </td>
+      </tr></table>
+    </td></tr>`;
+
+  const stat = (big: string, small: string) => `
+    <td align="center" style="padding:18px 6px;font-family:${SANS};">
+      <div style="font-size:26px;font-weight:800;color:${RED};">${big}</div>
+      <div style="font-size:12px;color:#6b6b6b;padding-top:2px;">${small}</div>
+    </td>`;
+
+  const html = `<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#ffffff;">
+<div style="display:none;max-height:0;overflow:hidden;opacity:0;">${first}, your RaktJaal account is ready. Three quick steps and you can start saving lives.</div>
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#ffffff;">
+
+  <!-- top bar -->
+  <tr><td style="background:${RED};padding:16px 32px;">
+    <table role="presentation" cellspacing="0" cellpadding="0"><tr>
+      <td style="padding-right:10px;"><img src="cid:rj-logo" width="30" height="30" alt="" style="display:block;border:0;border-radius:50%;width:30px;height:30px;background:#fff;"/></td>
+      <td style="font-family:${SANS};font-size:19px;font-weight:800;color:#ffffff;letter-spacing:0.3px;">RaktJaal</td>
+    </tr></table>
+  </td></tr>
+
+  <!-- hero on a full-width tinted band -->
+  <tr><td style="background:#FFF3F4;padding:28px 32px;line-height:0;font-size:0;">
+    <img src="cid:rj-hero-welcome" width="560" alt="" style="display:block;border:0;width:100%;max-width:560px;height:auto;border-radius:18px;"/>
+  </td></tr>
+
+  <!-- greeting -->
+  <tr><td style="padding:40px 32px 8px;font-family:${SANS};">
+    <div style="font-size:13px;font-weight:700;letter-spacing:2px;color:${RED};text-transform:uppercase;padding-bottom:12px;">Welcome aboard</div>
+    <div style="font-size:38px;line-height:1.15;font-weight:800;letter-spacing:-1px;color:${INK};">Hi ${first}, you just joined<br/>a network that saves lives.</div>
+    <div style="font-size:16px;line-height:1.7;color:#4a4a4a;padding-top:16px;">Every few seconds someone needs blood, and most of the time the right donor is only a few streets away. RaktJaal connects the two, fast. Your account is ready. Here is how to get going.</div>
+  </td></tr>
+
+  <!-- steps -->
+  <tr><td style="padding:28px 32px 6px;">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+      ${step("1", "Set your blood group", "Add it once. It is locked afterwards for safety, so matches are always accurate.")}
+      ${step("2", "Add your city", "So requests near you reach you first, and nobody has to travel far.")}
+      ${step("3", "Turn on availability", "Flip the switch when you are ready to donate. You can turn it off any time.")}
+    </table>
+  </td></tr>
+
+  <!-- CTA -->
+  <tr><td style="padding:10px 32px 34px;">
+    <a href="${esc(url)}/profile" style="display:inline-block;background:${RED};color:#ffffff;font-family:${SANS};font-size:16px;font-weight:700;text-decoration:none;padding:16px 36px;border-radius:999px;">Complete my profile &rarr;</a>
+  </td></tr>
+
+  <!-- stats strip -->
+  <tr><td style="padding:0 32px 34px;">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#FFF3F4;border-radius:16px;">
+      <tr>
+        ${stat("1", "donation can help up to 3 lives")}
+        ${stat("~1 hr", "to give blood, start to finish")}
+        ${stat("Free", "always, for donors and patients")}
+      </tr>
+    </table>
+  </td></tr>
+
+  <!-- closing note -->
+  <tr><td style="padding:0 32px 36px;font-family:${SANS};font-size:15px;line-height:1.7;color:#4a4a4a;">
+    Thank you for being here. Whether you donate today or a month from now, being reachable matters.<br/><br/>
+    <span style="color:${INK};font-weight:700;">Team RaktJaal</span>
+  </td></tr>
+
+  <!-- footer -->
+  <tr><td style="background:#F6F6F6;padding:26px 32px;font-family:${SANS};font-size:12px;line-height:1.7;color:${MUTED};">
+    You received this email because you created a RaktJaal account.<br/>
+    Questions? Write to <a href="mailto:raktjaal@gmail.com" style="color:${RED};text-decoration:none;">raktjaal@gmail.com</a><br/>
+    &copy; ${year} RaktJaal
+  </td></tr>
+</table>
+</body></html>`;
+
   return {
     subject: `Welcome to RaktJaal, ${o.name}`,
-    text: `Welcome to RaktJaal, ${o.name}.\n\nYour account is ready. Set your blood group and city, then turn on availability so nearby requests can reach you.\n\nOpen RaktJaal: ${url}/profile`,
-    html: shell({
-      hero: "welcome",
-      heading: `Welcome to RaktJaal,<br/>${esc(o.name)}`,
-      body:
-        p(`Your account is ready. RaktJaal connects people who need blood with donors nearby and every donor on it matters.`) +
-        p(`Set your blood group and city, then turn on availability so requests near you can find you.`),
-      ctaLabel: "Complete your profile",
-      ctaHref: `${url}/profile`,
-      preheader: "Your RaktJaal account is ready.",
-    }),
+    text: `Hi ${o.name},\n\nWelcome to RaktJaal. Your account is ready.\n\n1. Set your blood group\n2. Add your city\n3. Turn on availability\n\nComplete your profile: ${url}/profile\n\nThank you for being here.\nTeam RaktJaal`,
+    html,
   };
 }
 

@@ -2931,10 +2931,10 @@ function ActionPageInner() {
               aria-label="Your profile"
               className="rounded-full transition-shadow duration-150 rk-avatar-btn"
             >
-              {/* Soft tri-colour ring: hot pink, pale blue, pale yellow in equal thirds */}
+              {/* Soft tri-colour ring: hot pink, pale blue, pale lavender in equal thirds */}
               <span
                 className="flex rounded-full"
-                style={{ padding: 2, background: "conic-gradient(from 0deg, #FF4FA3 0deg 120deg, #BFE2FF 120deg 240deg, #FFF0A3 240deg 360deg)" }}
+                style={{ padding: 2, background: "conic-gradient(from 0deg, #FF4FA3 0deg 120deg, #BFE2FF 120deg 240deg, #DCD0FF 240deg 360deg)" }}
               >
                 <span className="flex rounded-full bg-white" style={{ padding: 2 }}>
                   <Avatar photo={user.profilePhoto} uid={user.uid} initials={initials} size={32} tone={C.chip} expandable={false} />
