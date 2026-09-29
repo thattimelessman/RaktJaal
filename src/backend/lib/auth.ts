@@ -3,7 +3,6 @@ import {
   signInWithEmailAndPassword,
   signInWithPopup,
   signOut,
-  sendPasswordResetEmail,
   updateProfile,
   linkWithCredential,
   reauthenticateWithCredential,
@@ -174,10 +173,18 @@ export async function resetPassword(email: string): Promise<void> {
   if (reg && reg.exists && !reg.providers.includes("password")) {
     throw new Error("This email is registered with Google, so there is no password to reset.");
   }
+  // Sent through our own route/template (see /api/auth/reset-password) rather
+  // than Firebase's sendPasswordResetEmail, so the email matches RaktJaal's
+  // Macaly-style design instead of Firebase's default.
   try {
-    await sendPasswordResetEmail(auth, email);
+    const res = await fetch("/api/auth/reset-password", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email }),
+    });
+    if (!res.ok) throw new Error("Could not send the reset email.");
   } catch (err) {
-    throw new Error(friendlyAuthError(err));
+    throw new Error(err instanceof Error ? err.message : "Could not send the reset email.");
   }
 }
 
@@ -227,4 +234,4 @@ export async function changeAccountPassword(currentPassword: string, newPassword
   } catch (err) {
     throw new Error(friendlyAuthError(err));
   }
-}
+}

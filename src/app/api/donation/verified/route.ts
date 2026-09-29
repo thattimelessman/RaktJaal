@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { FieldValue } from "firebase-admin/firestore";
 import { adminAuth, adminDb } from "@/backend/lib/firebaseAdmin";
-import nodemailer from "nodemailer";
+import { donationConfirmedEmail } from "@/backend/lib/emailTemplates";
+import { getMailer } from "@/backend/lib/mailer";
 import type { DonationLogEntry, DonationRequest } from "@/backend/types";
 
 export const runtime = "nodejs";
@@ -235,20 +236,8 @@ export async function POST(request: Request) {
 
     // Email notification remains best-effort.
     try {
-      const smtpUser = process.env.SMTP_USER;
-      const smtpPassword = process.env.SMTP_PASSWORD;
-
-      if (smtpUser && smtpPassword) {
-        const transporter = nodemailer.createTransport({
-          host: process.env.SMTP_HOST || "smtp.gmail.com",
-          port: Number(process.env.SMTP_PORT || 465),
-          secure: true,
-          auth: {
-            user: smtpUser,
-            pass: smtpPassword,
-          },
-        });
-
+      const mailer = getMailer();
+      if (mailer) {
         const [donorUser, requesterUser] = await Promise.all([
           adminAuth.getUser(req.donorUid),
           adminAuth.getUser(req.requesterUid),
@@ -256,42 +245,33 @@ export async function POST(request: Request) {
 
         const appUrl = (process.env.NEXT_PUBLIC_APP_URL || "").replace(/\/$/, "");
         const historyLink = appUrl ? `${appUrl}/profile#donation-history` : "/profile#donation-history";
+        const date = new Date().toUTCString().slice(0, 16);
 
-        const makeMail = (
-          toEmail: string,
-          toName: string,
-          counterpartName: string
-        ) => ({
-          from: `"RaktJaal" <${smtpUser}>`,
-          to: toEmail,
-          subject: "Donation confirmed on RaktJaal",
-          text: `Hi ${toName}, your ${req.bloodType} donation with ${counterpartName} at ${req.hospital} has been confirmed by both sides. View the details here: ${historyLink}\n\nThank you for using RaktJaal.`,
-          html: `<div style="font-family:Arial,sans-serif;line-height:1.6"><h2>Donation confirmed</h2><p>Hi ${toName},</p><p>Your <strong>${req.bloodType}</strong> donation with <strong>${counterpartName}</strong> at <strong>${req.hospital}</strong> has been confirmed by both sides.</p><p><a href="${historyLink}" style="color:#D6303F;font-weight:600;">View it in your donation history →</a></p><p>Thank you for using RaktJaal.</p></div>`,
-        });
-
-        const mails = [];
-
+        const sends = [];
         if (donorUser.email) {
-          mails.push(
-            makeMail(
-              donorUser.email,
-              req.donorName,
-              req.requesterName
-            )
-          );
+          const { subject, text, html } = donationConfirmedEmail({
+            toName: req.donorName,
+            counterpartName: req.requesterName,
+            bloodType: req.bloodType,
+            hospital: req.hospital,
+            historyLink,
+            date,
+          });
+          sends.push(mailer.transporter.sendMail({ from: mailer.from, to: donorUser.email, subject, text, html }));
         }
-
         if (requesterUser.email) {
-          mails.push(
-            makeMail(
-              requesterUser.email,
-              req.requesterName,
-              req.donorName
-            )
-          );
+          const { subject, text, html } = donationConfirmedEmail({
+            toName: req.requesterName,
+            counterpartName: req.donorName,
+            bloodType: req.bloodType,
+            hospital: req.hospital,
+            historyLink,
+            date,
+          });
+          sends.push(mailer.transporter.sendMail({ from: mailer.from, to: requesterUser.email, subject, text, html }));
         }
 
-        await Promise.all(mails.map((mail) => transporter.sendMail(mail)));
+        await Promise.all(sends);
       }
     } catch (e) {
       console.warn(
@@ -324,4 +304,4 @@ export async function POST(request: Request) {
       { status }
     );
   }
-}
+}

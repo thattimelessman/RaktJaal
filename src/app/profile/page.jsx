@@ -2244,12 +2244,29 @@ export default function ProfilePage() {
   };
 
   const updateField = (key, value) => {
+    const previous = user?.[key];
     const updated = { ...user, [key]: value };
     setUser(updated);
     flashSaved();
     updateUserProfile(authUser.uid, { [key]: value }).catch(() => {
       /* best-effort — the optimistic local update above already reflects the change */
     });
+
+    // Blood group change gets its own email alert (best-effort, fire-and-forget).
+    if (key === "bloodType" && value && value !== previous) {
+      authUser
+        .getIdToken()
+        .then((token) =>
+          fetch("/api/email/blood-type-changed", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ oldType: previous || null, newType: value }),
+          })
+        )
+        .catch(() => {
+          /* best-effort */
+        });
+    }
   };
 
 
@@ -2807,4 +2824,4 @@ export default function ProfilePage() {
       </section>
     </DialogShell>
   );
-}
+}

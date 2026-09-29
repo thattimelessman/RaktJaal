@@ -308,6 +308,21 @@ export async function createDonationRequest(input: CreateRequestInput): Promise<
   // The rules let the donor read it only after approving, never while pending.
   // (Separate write: the rule needs the parent request to exist first.)
   await publishOwnContact(id, input.requesterUid, input.requesterPhone);
+
+  // Email the donor too (best-effort; in-app notification is already written above).
+  try {
+    const idToken = await auth.currentUser?.getIdToken();
+    if (idToken) {
+      void fetch("/api/email/request-received", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${idToken}` },
+        body: JSON.stringify({ requestId: id }),
+      }).catch(() => {});
+    }
+  } catch {
+    /* best-effort */
+  }
+
   return id;
 }
 

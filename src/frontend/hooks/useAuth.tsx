@@ -13,6 +13,48 @@ import { doc, getDoc } from "firebase/firestore";
 import { auth, db } from "@/backend/lib/firebase";
 import { sendEmailOtp } from "@/backend/lib/auth";
 
+// Tracks uids already checked for a new-device sign-in THIS TAB, so a token
+// refresh or re-render doesn't re-trigger the check/email repeatedly.
+// Module-level (not state) — deliberately survives remounts within the tab.
+const newSignInCheckedRef = new Set<string>();
+
+/** Random id stored in this browser so the server can tell "same browser, new IP"
+ *  apart from "browser we've never seen". Undefined if storage is unavailable. */
+function getDeviceId(): string | undefined {
+  try {
+    let id = localStorage.getItem("rj_device_id");
+    if (!id) {
+      id = crypto.randomUUID();
+      localStorage.setItem("rj_device_id", id);
+    }
+    return id;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Best-effort, fire-and-forget: asks the server whether this is a device/
+ *  location we haven't seen before for this account, and if so, the server
+ *  sends the "new sign-in detected" email itself. Never blocks the UI and
+ *  never surfaces an error — this is a security nicety, not a gate. */
+function notifyNewSignInOnce(uid: string) {
+  if (newSignInCheckedRef.has(uid)) return;
+  newSignInCheckedRef.add(uid);
+  (async () => {
+    try {
+      const token = await auth.currentUser?.getIdToken();
+      if (!token) return;
+      await fetch("/api/auth/check-new-signin", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ deviceId: getDeviceId() }),
+      });
+    } catch {
+      /* best-effort */
+    }
+  })();
+}
+
 interface AuthContextValue {
   /** Null while signed out, AND null while a 2FA-enabled account is
    *  mid-verification — the rest of the app (NavBar, protected pages)
@@ -84,6 +126,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         } else {
           setUser(u);
           setPendingTwoFactorUser(null);
+          notifyNewSignInOnce(u.uid);
         }
       } catch {
         // Profile read failed — fail open rather than lock the person out.
@@ -100,6 +143,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     clearedUidsRef.current.add(pendingTwoFactorUser.uid);
     setUser(pendingTwoFactorUser);
     setPendingTwoFactorUser(null);
+    notifyNewSignInOnce(pendingTwoFactorUser.uid);
   };
 
   const refreshUser = async () => {

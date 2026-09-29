@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
-import { adminAuth } from "@/backend/lib/firebaseAdmin";
+import { adminAuth, adminDb } from "@/backend/lib/firebaseAdmin";
 import { verifyEmailOtp } from "@/backend/lib/emailOtp";
+import { welcomeEmail } from "@/backend/lib/emailTemplates";
+import { getMailer } from "@/backend/lib/mailer";
 
 export const runtime = "nodejs";
 
@@ -21,7 +23,23 @@ export async function POST(request: Request) {
 
     if (purpose === "registration") {
       await adminAuth.updateUser(user.uid, { emailVerified: true });
+
+      // Welcome email — once per user, best-effort (never fails verification).
+      try {
+        const userRef = adminDb.doc(`users/${user.uid}`);
+        const profileSnap = await userRef.get();
+        const profile = profileSnap.data() || {};
+        const mailer = getMailer();
+        if (mailer && !profile.welcomeEmailSentAt) {
+          const { subject, text, html } = welcomeEmail({ name: profile.name || user.displayName || "there" });
+          await mailer.transporter.sendMail({ from: mailer.from, to: user.email, subject, text, html });
+          await userRef.set({ welcomeEmailSentAt: Date.now() }, { merge: true });
+        }
+      } catch (e) {
+        console.warn("Verified, but welcome email failed:", e);
+      }
     }
+
     return NextResponse.json({ ok: true });
   } catch (err) {
     console.error(err);
